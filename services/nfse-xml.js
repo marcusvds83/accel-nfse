@@ -173,12 +173,12 @@ function gerarXmlDPS(dados) {
     <cLocEmi>${ibge}</cLocEmi>
     <prest>
       <CNPJ>${cnpjPrest}</CNPJ>${fonePrestXml}${emailPrestXml}
-      <IM>${config.nfse.inscricao_municipal}</IM>
       <regTrib>
         <opSimpNac>${c.op_simp_nac}</opSimpNac>
         <regApTribSN>${c.reg_ap_trib_sn}</regApTribSN>
         <regEspTrib>${c.reg_esp_trib}</regEspTrib>
       </regTrib>
+      <IM>${config.nfse.inscricao_municipal}</IM>
     </prest>
     <toma>
       <${docTomadorTag}>${docTomador}</${docTomadorTag}>
