@@ -4,6 +4,9 @@
  * Polling: busca faturas com x_nytro_nfse_status = 'pendente',
  * extrai dados via XML-RPC, gera XML DPS, assina com A1,
  * envia ao SPED NFS-e, e atualiza o Odoo com o resultado.
+ *
+ * Descobre campos dinamicamente via ir.model.fields para compatibilidade
+ * com qualquer Odoo (com ou sem l10n_br, Online, etc.)
  */
 
 const xmlrpc = require('xmlrpc');
@@ -54,34 +57,41 @@ function readFields(client, db, uid, model, ids, fields) {
 }
 
 /**
- * Descobre qual campo de CNPJ/CPF usar no modelo.
- * Prioridade: cnpj_cpf (l10n_br) > x_nytro_cnpj > vat > company_registry
+ * Descobre quais campos de uma lista realmente existem no modelo.
+ * Retorna apenas os campos existentes.
  */
-async function descobrirCampoCnpj(client, db, uid, model, ids, fallbackValue) {
-  const camposPossiveis = ['cnpj_cpf', 'x_nytro_cnpj', 'vat', 'company_registry'];
+async function filtrarCamposExistentes(client, db, uid, modelo, camposDesejados) {
   const camposModelo = await executeKw(client, db, uid, 'ir.model.fields', 'search_read',
-    [[['model', '=', model], ['name', 'in', camposPossiveis]]],
+    [[['model', '=', modelo], ['name', 'in', camposDesejados]]],
     { fields: ['name'] }
   );
-  const camposExistentes = camposModelo.map(f => f.name);
-  for (const c of camposPossiveis) {
-    if (camposExistentes.includes(c)) return c;
+  const existentes = new Set(camposModelo.map(f => f.name));
+  const validos = camposDesejados.filter(c => existentes.has(c));
+  const faltantes = camposDesejados.filter(c => !existentes.has(c));
+  if (faltantes.length > 0) {
+    console.log('[NFSE-EMIT] Campos ausentes em ' + modelo + ': ' + faltantes.join(', '));
   }
-  return null; // nenhum campo existe
+  return validos;
 }
 
 /**
- * Le CNPJ/CPF de um registro, tentando multiplos campos.
- * Retorna string so com digitos.
+ * Descobre o melhor campo de CNPJ/CPF disponivel no modelo.
+ * Prioridade: cnpj_cpf (l10n_br) > x_nytro_cnpj > vat > company_registry
  */
-function extrairCnpj(record, campoCnpj, fallbackConfig) {
+async function descobrirCampoCnpj(client, db, uid, modelo) {
+  const candidatos = ['cnpj_cpf', 'x_nytro_cnpj', 'vat', 'company_registry'];
+  const validos = await filtrarCamposExistentes(client, db, uid, modelo, candidatos);
+  return validos[0] || null;
+}
+
+/**
+ * Extrai CNPJ/CPF de um registro, retorna so digitos.
+ */
+function extrairCnpj(record, campoCnpj, fallback) {
   if (campoCnpj && record[campoCnpj]) {
     return String(record[campoCnpj]).replace(/[^0-9]/g, '');
   }
-  // Fallback: usar CNPJ da config (prestador)
-  if (fallbackConfig) {
-    return String(fallbackConfig).replace(/[^0-9]/g, '');
-  }
+  if (fallback) return String(fallback).replace(/[^0-9]/g, '');
   return '';
 }
 
@@ -148,41 +158,75 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     throw new Error('Certificado A1 nao encontrado no Firebase. Faca upload via POST /api/v1/nfse/certificado');
   }
 
-  // 3. Descobrir campos de CNPJ disponiveis
-  const campoCnpjCompany = await descobrirCampoCnpj(client, db, uid, 'res.company', [1]);
-  const campoCnpjPartner = await descobrirCampoCnpj(client, db, uid, 'res.partner', [1]);
-  console.log('[NFSE-EMIT] Campo CNPJ company:', campoCnpjCompany, '| partner:', campoCnpjPartner);
+  // 3. Descobrir campos CNPJ
+  const campoCnpjCompany = await descobrirCampoCnpj(client, db, uid, 'res.company');
+  const campoCnpjPartner = await descobrirCampoCnpj(client, db, uid, 'res.partner');
+  console.log('[NFSE-EMIT] CNPJ: company=' + campoCnpjCompany + ' partner=' + campoCnpjPartner);
 
-  // 4. Leitura dos dados da fatura (campos que sempre existem)
+  // 4. Leitura da fatura
   const moves = await readFields(client, db, uid, 'account.move', [moveId], [
     'name', 'partner_id', 'company_id', 'invoice_date', 'amount_total', 'amount_untaxed',
     'amount_tax', 'narration', 'payment_reference', 'invoice_line_ids',
   ]);
   const move = moves[0];
 
-  // 5. Leitura da empresa (usando campo descoberto)
-  const camposCompany = ['name', 'street', 'street2', 'city_id', 'state_id', 'zip',
-    'phone', 'email', 'district', 'country_id', 'state_id'];
-  if (campoCnpjCompany) camposCompany.push(campoCnpjCompany);
-  // Adiciona campos custom NFS-e da empresa
-  camposCompany.push('x_nytro_nfse_dados_prestador_im', 'x_nytro_nfse_numero');
-
+  // 5. Leitura da empresa — descobre campos existentes dinamicamente
+  const camposCompanyDesejados = [
+    'name', 'street', 'street2', 'city', 'city_id', 'state_id', 'state',
+    'zip', 'phone', 'email', 'district', 'country_id', 'l10n_br_city_id',
+    'company_registry', 'vat', 'website',
+    'x_nytro_nfse_dados_prestador_im', 'x_nytro_nfse_numero',
+  ];
+  const camposCompany = await filtrarCamposExistentes(client, db, uid, 'res.company', camposCompanyDesejados);
   const companies = await readFields(client, db, uid, 'res.company', [move.company_id[0]], camposCompany);
   const company = companies[0];
 
-  // Extrai CNPJ da empresa
+  // Extrai CNPJ da empresa (fallback: CNPJ Nytro da config)
   company._cnpj = extrairCnpj(company, campoCnpjCompany, '63820783000170');
 
-  // 6. Leitura do parceiro (tomador) - sem cnpj_cpf!
-  const camposPartner = ['name', 'street', 'street2', 'city_id', 'state_id', 'zip',
-    'phone', 'email', 'legal_name', 'district', 'country_id', 'vat'];
-  if (campoCnpjPartner) camposPartner.push(campoCnpjPartner);
+  // Extrai cidade da empresa (city || city_id || config)
+  if (company.city_id) {
+    company._cidade = company.city_id[1] || '';
+  } else if (company.city) {
+    company._cidade = company.city;
+  } else {
+    company._cidade = config.nfse.cidade;
+  }
 
+  // Extrai UF da empresa (state_id || state || config)
+  if (company.state_id) {
+    company._uf = company.state_id[1] || config.nfse.uf;
+  } else if (company.state) {
+    company._uf = company.state;
+  } else {
+    company._uf = config.nfse.uf;
+  }
+
+  console.log('[NFSE-EMIT] Empresa: ' + company.name + ' CNPJ=' + company._cnpj + ' Cidade=' + company._cidade);
+
+  // 6. Leitura do parceiro (tomador)
+  const camposPartnerDesejados = [
+    'name', 'street', 'street2', 'city', 'city_id', 'state_id', 'state',
+    'zip', 'phone', 'email', 'district', 'country_id', 'country_code',
+    'legal_name', 'company_name', 'vat', 'cnpj_cpf', 'l10n_br_city_id',
+  ];
+  const camposPartner = await filtrarCamposExistentes(client, db, uid, 'res.partner', camposPartnerDesejados);
   const partners = await readFields(client, db, uid, 'res.partner', [move.partner_id[0]], camposPartner);
   const partner = partners[0];
 
   // Extrai CNPJ do tomador
   partner._cnpj = extrairCnpj(partner, campoCnpjPartner, null);
+
+  // Extrai cidade do tomador
+  if (partner.city_id) {
+    partner._cidade = partner.city_id[1] || '';
+  } else if (partner.city) {
+    partner._cidade = partner.city;
+  } else {
+    partner._cidade = '';
+  }
+
+  console.log('[NFSE-EMIT] Tomador: ' + partner.name + ' CNPJ=' + partner._cnpj + ' Cidade=' + partner._cidade);
 
   // 7. Leitura das linhas de servico
   const allLines = await readFields(client, db, uid, 'account.move.line', move.invoice_line_ids, [
@@ -190,14 +234,16 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
   ]);
   const serviceLines = allLines.filter(l => !l.display_type && l.price_subtotal > 0);
 
-  // 8. Leitura dos produtos (product.template, nao product.product)
+  // 8. Leitura dos produtos
   const productIds = serviceLines.filter(l => l.product_id).map(l => l.product_id[0]).filter(Boolean);
+  const camposProdutoDesejados = [
+    'name', 'default_code',
+    'x_nytro_codigo_tributacao', 'x_nytro_c_nbs',
+    'x_nytro_aliquota_iss', 'x_nytro_iss_retido', 'x_nytro_descricao_nfse',
+  ];
+  const camposProduto = await filtrarCamposExistentes(client, db, uid, 'product.product', camposProdutoDesejados);
   const products = productIds.length
-    ? await readFields(client, db, uid, 'product.product', productIds, [
-        'name', 'default_code',
-        'x_nytro_codigo_tributacao', 'x_nytro_c_nbs',
-        'x_nytro_aliquota_iss', 'x_nytro_iss_retido', 'x_nytro_descricao_nfse',
-      ])
+    ? await readFields(client, db, uid, 'product.product', productIds, camposProduto)
     : [];
   const productMap = {};
   products.forEach(p => { productMap[p.id] = p; });

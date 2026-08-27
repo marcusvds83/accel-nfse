@@ -131,8 +131,9 @@ function gerarXmlDPS(dados) {
   const nroTomador = extraiNumero(partner.street, partner.street2, partner.number);
   const logrTomador = limpaLogradouro(partner.street);
   const bairroTomador = partner.district || partner.street2 || '';
+  const bairroPrest = company.district || company.street2 || '';
   const cepTomador = limpaDoc(partner.zip || '');
-  const ibgeTomador = ibgeFromCity(partner.city_id);
+  const ibgeTomador = ibgeFromCity(partner.city_id || partner._cidade);
 
   // --- Servico ---
   // Usa dados do primeiro produto, ou padrao da config
@@ -171,6 +172,7 @@ function gerarXmlDPS(dados) {
       <CNPJ>${cnpjPrest}</CNPJ>
       <fone>${fonePrest}</fone>
       <email>${escXml(emailPrest)}</email>
+      <IM>${config.nfse.inscricao_municipal}</IM>
       <regTrib>
         <opSimpNac>${c.op_simp_nac}</opSimpNac>
         <regApTribSN>${c.reg_ap_trib_sn}</regApTribSN>
