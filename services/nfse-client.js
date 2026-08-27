@@ -20,14 +20,28 @@ function getEndpoint() {
     : config.prefeitura.homologacao;
 }
 
-/** Cria agente HTTPS com certificado A1 (mTLS) */
+/** Cria agente HTTPS com certificado A1 (mTLS) usando PEM */
 function createHttpsAgent(cert) {
-  if (!cert || !cert.pfx) return null;
-  return new https.Agent({
-    pfx: cert.pfx,
-    passphrase: '', // senha ja foi removida ao salvar no Firebase
-    rejectUnauthorized: !config.tls_insecure,
-  });
+  if (!cert) return null;
+  // Prefere PEM direto (mais confiavel que PFX)
+  if (cert.privateKeyPem && cert.certPem) {
+    const ca = (cert.chainPem || []).join('');
+    return new https.Agent({
+      key: cert.privateKeyPem,
+      cert: cert.certPem,
+      ca: ca || undefined,
+      rejectUnauthorized: !config.tls_insecure,
+    });
+  }
+  // Fallback PFX
+  if (cert.pfx) {
+    return new https.Agent({
+      pfx: cert.pfx,
+      passphrase: cert.senha || '',
+      rejectUnauthorized: !config.tls_insecure,
+    });
+  }
+  return null;
 }
 
 /**
