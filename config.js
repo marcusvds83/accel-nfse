@@ -54,8 +54,8 @@ module.exports = {
 
   // === Webservice SPED NFS-e ===
   prefeitura: {
-    homologacao: process.env.PREF_HOM_URL || 'https://homologacao.nfse.gov.br/ws/NfseServico/NfseServico.svc',
-    producao: process.env.PREF_PROD_URL || 'https://nfse.gov.br/ws/NfseServico/NfseServico.svc',
+    homologacao: process.env.PREF_HOM_URL || 'https://homologacao.nfse.fazenda.gov.br/ws/NfseServico/NfseServico.svc',
+    producao: process.env.PREF_PROD_URL || 'https://nfse.fazenda.gov.br/ws/NfseServico/NfseServico.svc',
   },
 
   // === Seguranca ===
