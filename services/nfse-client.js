@@ -20,27 +20,24 @@ function getEndpoint() {
     : config.prefeitura.homologacao;
 }
 
-/** Cria agente HTTPS com certificado A1 (mTLS) usando PEM */
+/** Cria agente HTTPS com certificado A1 (mTLS) */
 function createHttpsAgent(cert) {
   if (!cert) return null;
-  // Prefere PEM direto (mais confiavel que PFX)
-  if (cert.privateKeyPem && cert.certPem) {
-    const ca = (cert.chainPem || []).join('');
-    return new https.Agent({
-      key: cert.privateKeyPem,
-      cert: cert.certPem,
-      ca: ca || undefined,
-      rejectUnauthorized: !config.tls_insecure,
-    });
-  }
-  // Fallback PFX
+  const tlsOpts = { rejectUnauthorized: !config.tls_insecure };
+
+  // 1. Tenta PFX com senha correta (mais confiavel)
   if (cert.pfx) {
-    return new https.Agent({
-      pfx: cert.pfx,
-      passphrase: cert.senha || '',
-      rejectUnauthorized: !config.tls_insecure,
-    });
+    console.log('[NFSE-CLIENT] Usando PFX para mTLS (pfx=' + cert.pfx.length + ' bytes, senha=' + (cert.senha ? 'sim' : 'nao') + ')');
+    return new https.Agent({ ...tlsOpts, pfx: cert.pfx, passphrase: cert.senha || '' });
   }
+
+  // 2. Fallback PEM
+  if (cert.privateKeyPem && cert.certPem) {
+    console.log('[NFSE-CLIENT] Usando PEM para mTLS (key=' + cert.privateKeyPem.length + ' bytes, cert=' + cert.certPem.length + ' bytes)');
+    return new https.Agent({ ...tlsOpts, key: cert.privateKeyPem, cert: cert.certPem });
+  }
+
+  console.warn('[NFSE-CLIENT] Nenhum certificado disponivel para mTLS!');
   return null;
 }
 
