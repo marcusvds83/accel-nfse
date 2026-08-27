@@ -121,6 +121,9 @@ function gerarXmlDPS(dados) {
   // --- Prestador ---
   const fonePrest = limpaDoc(company.phone || '');
   const emailPrest = company.email || '';
+  // TSTelefone so aceita digitos (10-11), se vazio omite a tag
+  const fonePrestXml = fonePrest.length >= 10 ? `\n      <fone>${fonePrest}</fone>` : '';
+  const emailPrestXml = emailPrest ? `\n      <email>${escXml(emailPrest)}</email>` : '';
 
   // --- Tomador ---
   const docTomador = limpaDoc(partner._cnpj || partner.vat || '');
@@ -169,9 +172,7 @@ function gerarXmlDPS(dados) {
     <tpEmit>1</tpEmit>
     <cLocEmi>${ibge}</cLocEmi>
     <prest>
-      <CNPJ>${cnpjPrest}</CNPJ>
-      <fone>${fonePrest}</fone>
-      <email>${escXml(emailPrest)}</email>
+      <CNPJ>${cnpjPrest}</CNPJ>${fonePrestXml}${emailPrestXml}
       <IM>${config.nfse.inscricao_municipal}</IM>
       <regTrib>
         <opSimpNac>${c.op_simp_nac}</opSimpNac>
@@ -191,7 +192,7 @@ function gerarXmlDPS(dados) {
         <nro>${escXml(nroTomador)}</nro>
         <xBairro>${escXml(bairroTomador)}</xBairro>
       </end>
-      <email>${escXml(emailTomador)}</email>
+      ${emailTomador ? '<email>' + escXml(emailTomador) + '</email>' : ''}
     </toma>
     <serv>
       <locPrest>
