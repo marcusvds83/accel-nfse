@@ -117,16 +117,28 @@ curl -X POST https://nfse-nytro.onrender.com/api/v1/nfse/certificado \
   -d '{"pfxBase64":"'$(base64 -w0 Nytro.pfx)'","senha":"SUA_SENHA"}'
 ```
 
+## Gerar API Key no Odoo
+
+1. Acesse o Odoo da Nytro
+2. Clique no avatar do usuario (canto superior direito) > **Preferencias**
+3. Va em **Conteudo > Chaves de API** (ou "API Keys")
+4. Clique em **Gerar nova chave** e copie o valor
+5. Cole nas Environment Variables do Render como `ODOO_API_KEY`
+
+> A API Key substitui login e senha. Ela expira se o usuario alterar sua senha.
+
 ## Criar Botoes no Odoo
 
 ```bash
 # Botao Emitir NFS-e
 ODOO_URL=https://nytro.odoo.com ODOO_DB=nytro \
-  ODOO_LOGIN=admin ODOO_PASSWORD=xxx \
+  ODOO_API_KEY=sua-api-key-aqui \
   python3 odoo-scripts/criar-botao-emitir-nfse.py
 
 # Botao Cancelar NFS-e
-ODOO_URL=... MIDDLEWARE_URL=https://nfse-nytro.onrender.com \
+ODOO_URL=https://nytro.odoo.com ODOO_DB=nytro \
+  ODOO_API_KEY=sua-api-key-aqui \
+  MIDDLEWARE_URL=https://nfse-nytro.onrender.com \
   MIDDLEWARE_API_KEY=sua-chave \
   python3 odoo-scripts/criar-botao-cancelar-nfse.py
 ```

@@ -29,13 +29,12 @@ module.exports = {
     serie: process.env.NFSE_SERIE || '1',
   },
 
-  // === Odoo ===
+  // === Odoo (autenticacao via API Key) ===
   odoo: {
     enabled: process.env.ODOO_ENABLED === '1',
     url: process.env.ODOO_URL || '',
     db: process.env.ODOO_DB || '',
-    login: process.env.ODOO_LOGIN || '',
-    password: process.env.ODOO_PASSWORD || '',
+    api_key: process.env.ODOO_API_KEY || '',
     polling_interval_ms: parseInt(process.env.ODOO_POLLING_MS || '15000', 10),
   },
 

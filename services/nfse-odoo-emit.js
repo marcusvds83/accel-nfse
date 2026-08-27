@@ -1,7 +1,8 @@
 /**
  * services/nfse-odoo-emit.js — Integracao Odoo + Emissao NFS-e
  * =============================================================
- * Polling: busca faturas no Odoo com x_nytro_nfse_status = "pendente",
+ * Autenticacao via API Key do Odoo (sem senha de usuario).
+ * Polling: busca faturas com x_nytro_nfse_status = "pendente",
  * extrai dados via XML-RPC, gera XML, assina, envia a prefeitura,
  * e atualiza o Odoo com o resultado.
  *
@@ -38,6 +39,10 @@ const xmlrpc = require('xmlrpc');
 const config = require('../config');
 
 // === XML-RPC Helpers ===
+// No Odoo SaaS, a API Key substitui a senha no XML-RPC.
+// A autenticacao usa: authenticate(db, user_login, api_key, {})
+// Todas as chamadas execute_kw usam a api_key no lugar da senha.
+
 function createClient(url) {
   const base = url.replace(/\/+$/, '');
   const host = base.replace('https://', '').replace('http://', '');
@@ -51,32 +56,40 @@ function createClient(url) {
 }
 
 function authenticate(client) {
+  const apiKey = config.odoo.api_key;
+  const db = config.odoo.db;
   return new Promise((resolve, reject) => {
-    client.common.methodCall('authenticate', [config.odoo.db, config.odoo.login, config.odoo.password, {}], (err, uid) => {
+    // Odoo SaaS: usa o email do usuario como login + API Key como senha
+    client.common.methodCall('authenticate', [db, apiKey, apiKey, {}], (err, uid) => {
       if (err) reject(new Error('Auth Odoo falhou: ' + (err.message || JSON.stringify(err))));
-      else if (uid === false || uid === null) reject(new Error('Credenciais Odoo invalidas.'));
+      else if (uid === false || uid === null) reject(new Error('API Key Odoo invalida ou expirada.'));
       else resolve(uid);
     });
   });
 }
 
-function executeKw(client, db, uid, pwd, model, method, args, kwargs) {
+function executeKw(client, db, uid, model, method, args, kwargs) {
+  const apiKey = config.odoo.api_key;
   return new Promise((resolve, reject) => {
-    client.models.methodCall('execute_kw', [db, uid, pwd, model, method, args || [], kwargs || {}], (err, result) => {
+    client.models.methodCall('execute_kw', [db, uid, apiKey, model, method, args || [], kwargs || {}], (err, result) => {
       if (err) reject(err);
       else resolve(result);
     });
   });
 }
 
-function readFields(client, db, uid, pwd, model, ids, fields) {
-  return executeKw(client, db, uid, pwd, model, 'read', [ids], { fields });
+function readFields(client, db, uid, model, ids, fields) {
+  return executeKw(client, db, uid, model, 'read', [ids], { fields });
 }
 
 // === Processar emissões pendentes ===
 async function processPendingEmissions() {
   if (!config.odoo.enabled || !config.odoo.url) {
     return { processed: 0, reason: 'odoo_not_configured' };
+  }
+  if (!config.odoo.api_key) {
+    console.error('[NFSE-EMIT] ODOO_API_KEY nao configurada.');
+    return { processed: 0, reason: 'no_api_key' };
   }
 
   const client = createClient(config.odoo.url);
@@ -88,11 +101,10 @@ async function processPendingEmissions() {
     return { processed: 0, reason: 'auth_failed' };
   }
   const db = config.odoo.db;
-  const pwd = config.odoo.password;
 
   try {
     // Busca faturas pendentes
-    const moveIds = await executeKw(client, db, uid, pwd, 'account.move', 'search', [[
+    const moveIds = await executeKw(client, db, uid, 'account.move', 'search', [[
       ['move_type', '=', 'out_invoice'],
       ['state', '=', 'posted'],
       ['x_nytro_nfse_status', '=', 'pendente'],
@@ -105,10 +117,10 @@ async function processPendingEmissions() {
     for (let i = 0; i < moveIds.length; i++) {
       const moveId = moveIds[i];
       try {
-        await emitirNfseOdoo(client, db, uid, pwd, moveId);
+        await emitirNfseOdoo(client, db, uid, moveId);
       } catch (e) {
         console.error('[NFSE-EMIT] Erro ao emitir move_id=' + moveId + ':', e.message);
-        await safeUpdateError(client, db, uid, pwd, moveId, e.message);
+        await safeUpdateError(client, db, uid, moveId, e.message);
       }
     }
 
@@ -119,21 +131,21 @@ async function processPendingEmissions() {
   }
 }
 
-async function emitirNfseOdoo(client, db, uid, pwd, moveId) {
+async function emitirNfseOdoo(client, db, uid, moveId) {
   // Marca como processando
-  await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], {
+  await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
     x_nytro_nfse_status: 'processando',
   }]);
 
   // Leitura dos dados da fatura
-  const moves = await readFields(client, db, uid, pwd, 'account.move', [moveId], [
+  const moves = await readFields(client, db, uid, 'account.move', [moveId], [
     'name', 'partner_id', 'company_id', 'invoice_date', 'amount_total', 'amount_untaxed',
     'amount_tax', 'narration', 'payment_reference', 'invoice_line_ids',
   ]);
   const move = moves[0];
 
   // Leitura da empresa
-  const companies = await readFields(client, db, uid, pwd, 'res.company', [move.company_id[0]], [
+  const companies = await readFields(client, db, uid, 'res.company', [move.company_id[0]], [
     'name', 'cnpj_cpf', 'street', 'city_id', 'state_id', 'zip', 'phone', 'email',
     'x_nytro_nfse_serie', 'x_nytro_nfse_ultimo_numero', 'x_nytro_nfse_inscricao_municipal',
     'x_nytro_nfse_aliquota_padrao', 'x_nytro_nfse_optante_simples', 'x_nytro_nfse_cnae',
@@ -142,21 +154,21 @@ async function emitirNfseOdoo(client, db, uid, pwd, moveId) {
   const company = companies[0];
 
   // Leitura do parceiro (tomador)
-  const partners = await readFields(client, db, uid, pwd, 'res.partner', [move.partner_id[0]], [
+  const partners = await readFields(client, db, uid, 'res.partner', [move.partner_id[0]], [
     'name', 'cnpj_cpf', 'street', 'street2', 'number', 'city_id', 'state_id', 'zip',
     'phone', 'email', 'inscr_est', 'legal_name',
   ]);
   const partner = partners[0];
 
   // Leitura das linhas de servico
-  const lines = await readFields(client, db, uid, pwd, 'account.move.line', move.invoice_line_ids, [
+  const lines = await readFields(client, db, uid, 'account.move.line', move.invoice_line_ids, [
     'name', 'quantity', 'price_unit', 'price_subtotal', 'product_id', 'tax_ids',
   ]);
 
   // Leitura dos produtos para obter dados fiscais
   const productIds = lines.filter(l => l.product_id).map(l => l.product_id[0]).filter(Boolean);
   const products = productIds.length
-    ? await readFields(client, db, uid, pwd, 'product.product', productIds, [
+    ? await readFields(client, db, uid, 'product.product', productIds, [
         'name', 'x_nytro_item_lista', 'x_nytro_cnae', 'x_nytro_codigo_tributacao',
         'x_nytro_aliquota_iss', 'x_nytro_iss_retido', 'x_nytro_descricao_nfse',
       ])
@@ -166,7 +178,7 @@ async function emitirNfseOdoo(client, db, uid, pwd, moveId) {
 
   // Incrementa numeracao
   const proximoNumero = (company.x_nytro_nfse_ultimo_numero || 0) + 1;
-  await executeKw(client, db, uid, pwd, 'res.company', 'write', [[company.id], {
+  await executeKw(client, db, uid, 'res.company', 'write', [[company.id], {
     x_nytro_nfse_ultimo_numero: proximoNumero,
   }]);
 
@@ -177,20 +189,20 @@ async function emitirNfseOdoo(client, db, uid, pwd, moveId) {
   console.log('[NFSE-EMIT] Fatura ' + move.name + ' (move_id=' + moveId + ') — logica de emissao sera implementada no proximo passo.');
 
   // Reverte para pendente (enquanto nao implementado)
-  await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], {
+  await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
     x_nytro_nfse_status: 'pendente',
     x_nytro_nfse_erro: 'Emissao NFS-e ainda nao implementada. Aguardando proximos passos.',
   }]);
 }
 
-async function safeUpdateError(client, db, uid, pwd, moveId, errMsg) {
+async function safeUpdateError(client, db, uid, moveId, errMsg) {
   try {
-    await executeKw(client, db, uid, pwd, 'account.move', 'write', [[moveId], {
+    await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
       x_nytro_nfse_status: config.nfse.status_on_error || 'erro',
       x_nytro_nfse_erro: errMsg.substring(0, 1000),
     }]);
     // Mensagem no chatter
-    await executeKw(client, db, uid, pwd, 'mail.message', 'create', [{
+    await executeKw(client, db, uid, 'mail.message', 'create', [{
       model: 'account.move',
       res_id: moveId,
       body: '<b>Erro na Emissao de NFS-e</b><br/>' + errMsg.substring(0, 500),

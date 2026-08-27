@@ -8,9 +8,11 @@ no menu Acao (engrenagem) do formulario de faturas (account.move).
 O botao apenas marca x_nytro_nfse_status = 'pendente'. O polling do
 middleware detecta e processa automaticamente.
 
+Autenticacao via API Key do Odoo (gerada em Preferencias > Chaves de API).
+
 Execute:
   ODOO_URL=https://nytro.odoo.com ODOO_DB=nytro \\
-  ODOO_LOGIN=admin ODOO_PASSWORD=xxx \\
+  ODOO_API_KEY=sua-api-key-aqui \\
   python3 odoo-scripts/criar-botao-emitir-nfse.py
 """
 
@@ -18,19 +20,18 @@ import os, xmlrpc.client
 
 ODOO_URL = os.environ['ODOO_URL'].rstrip('/')
 ODOO_DB = os.environ['ODOO_DB']
-ODOO_LOGIN = os.environ['ODOO_LOGIN']
-ODOO_PASSWORD = os.environ['ODOO_PASSWORD']
+ODOO_API_KEY = os.environ['ODOO_API_KEY']
 
 common = xmlrpc.client.ServerProxy(f'{ODOO_URL}/xmlrpc/2/common')
-uid = common.authenticate(ODOO_DB, ODOO_LOGIN, ODOO_PASSWORD, {})
+uid = common.authenticate(ODOO_DB, ODOO_API_KEY, ODOO_API_KEY, {})
 if not uid:
-    raise SystemExit('Autenticacao falhou')
+    raise SystemExit('Autenticacao falhou. Verifique ODOO_API_KEY.')
 print(f'Autenticado como uid={uid}')
 
 models = xmlrpc.client.ServerProxy(f'{ODOO_URL}/xmlrpc/2/object')
 
 def kw(model, method, args=None, kwargs=None):
-    return models.execute_kw(ODOO_DB, uid, ODOO_PASSWORD, model, method, args or [], kwargs or {})
+    return models.execute_kw(ODOO_DB, uid, ODOO_API_KEY, model, method, args or [], kwargs or {})
 
 # Busca ID do modelo account.move
 model_ids = kw('ir.model', 'search', [[['model', '=', 'account.move']]])
