@@ -1,0 +1,262 @@
+/**
+ * services/firebase-cert.js — Cofre do certificado A1 no Firebase
+ * ==============================================================
+ * Armazena o certificado digital (.pfx em base64) + senha cifrada (AES-256-GCM)
+ * no Firestore do Firebase. O certificado e carregado em memoria (cache) e
+ * o PEM da chave privada + cadeia sao extraidos via node-forge ou OpenSSL.
+ *
+ * Fluxo:
+ *   1. Certificado e enviado via POST /api/v1/nfse/certificado
+ *   2. Senha e cifrada client-side antes de enviar (ou server-side aqui)
+ *   3. Armazenado no Firestore (documento unico)
+ *   4. Em memoria: cache do PFX + PEM extraido
+ *
+ * Vantagens do Firebase como cofre:
+ *   - Sobrevive deploys/reinicios no Render
+ *   - Nao precisa de disco persistente
+ *   - Acesso seguro via service account
+ *   - Regras de seguranca do Firestore
+ */
+
+const crypto = require('crypto');
+const forge = require('node-forge');
+const config = require('../config');
+const openPfxWithOpenssl = require('./pfx-openssl').openPfxWithOpenssl;
+
+// === Cache em memoria ===
+let cache = null;
+// { pfx: Buffer, senha: string, privateKeyPem, certPem, chainPem[], info: {...} }
+
+// === Inicializacao do Firebase ===
+let db = null;
+let firebaseReady = false;
+
+function initFirebase() {
+  if (firebaseReady) return;
+  if (!config.firebase.project_id || !config.firebase.client_email || !config.firebase.private_key) {
+    console.warn('[FIREBASE-CERT] Firebase nao configurado. Defina FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY.');
+    return;
+  }
+  try {
+    const admin = require('firebase-admin');
+    if (admin.apps.length === 0) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: config.firebase.project_id,
+          privateKey: config.firebase.private_key,
+          clientEmail: config.firebase.client_email,
+        }),
+      });
+    }
+    db = admin.firestore();
+    firebaseReady = true;
+    console.log('[FIREBASE-CERT] Firebase inicializado. Projeto: ' + config.firebase.project_id);
+  } catch (e) {
+    console.error('[FIREBASE-CERT] Falha ao inicializar Firebase:', e.message);
+  }
+}
+
+// === Cifragem da senha (AES-256-GCM) ===
+function deriveKey() {
+  const base = process.env.NFSE_CERT_KEK || process.env.API_KEY || 'nytro-nfse-local-kek';
+  return crypto.createHash('sha256').update(String(base)).digest();
+}
+
+function encryptSenha(senha) {
+  const iv = crypto.randomBytes(12);
+  const c = crypto.createCipheriv('aes-256-gcm', deriveKey(), iv);
+  const enc = Buffer.concat([c.update(String(senha), 'utf8'), c.final()]);
+  return Buffer.concat([iv, c.getAuthTag(), enc]).toString('base64');
+}
+
+function decryptSenha(blob) {
+  const buf = Buffer.from(String(blob), 'base64');
+  const iv = buf.slice(0, 12);
+  const tag = buf.slice(12, 28);
+  const d = crypto.createDecipheriv('aes-256-gcm', deriveKey(), iv);
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(buf.slice(28)), d.final()]).toString('utf8');
+}
+
+// === Extracao de informacoes do certificado ===
+function onlyNum(s) { return String(s || '').replace(/\D/g, ''); }
+
+function infoFromCertPem(certPem) {
+  const leaf = forge.pki.certificateFromPem(certPem);
+  let cn = '';
+  try { cn = (leaf.subject.getField('CN') || {}).value || ''; } catch (e) { cn = ''; }
+  const cnpj = onlyNum((cn.split(':')[1] || ''));
+  return {
+    titular: cn.split(':')[0] || cn,
+    cnpj: cnpj.length === 14 ? cnpj : (cn.match(/(\d{14})/) || [])[1] || '',
+    emissor: (function () { try { return (leaf.issuer.getField('CN') || {}).value || ''; } catch (e) { return ''; } })(),
+    validoDe: leaf.validity.notBefore.toISOString(),
+    validoAte: leaf.validity.notAfter.toISOString(),
+    diasRestantes: Math.floor((leaf.validity.notAfter.getTime() - Date.now()) / 86400000),
+    expirado: leaf.validity.notAfter.getTime() < Date.now(),
+    serial: leaf.serialNumber,
+  };
+}
+
+// === Leitura do PFX ===
+function openPfxForge(pfxBuffer, senha) {
+  const der = forge.util.createBuffer(pfxBuffer.toString('binary'));
+  const asn1 = forge.asn1.fromDer(der);
+  const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, String(senha));
+  let keyBags = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag })[forge.pki.oids.pkcs8ShroudedKeyBag] || [];
+  if (!keyBags.length) keyBags = p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag] || [];
+  if (!keyBags.length || !keyBags[0].key) throw new Error('Chave privada nao encontrada no certificado A1.');
+  const privateKeyPem = forge.pki.privateKeyToPem(keyBags[0].key);
+  const certBags = p12.getBags({ bagType: forge.pki.oids.certBag })[forge.pki.oids.certBag] || [];
+  if (!certBags.length) throw new Error('Certificado nao encontrado no arquivo .pfx.');
+  let leaf = null;
+  const chainPem = [];
+  for (let i = 0; i < certBags.length; i++) {
+    const c = certBags[i].cert;
+    if (!c) continue;
+    chainPem.push(forge.pki.certificateToPem(c));
+    let isCa = false;
+    try { const bc = c.getExtension('basicConstraints'); isCa = !!(bc && bc.cA); } catch (e) { isCa = false; }
+    if (!isCa && !leaf) leaf = c;
+  }
+  if (!leaf) leaf = certBags[0].cert;
+  const certPem = forge.pki.certificateToPem(leaf);
+  return { privateKeyPem, certPem, chainPem, info: infoFromCertPem(certPem) };
+}
+
+function openPfx(pfxBuffer, senha) {
+  if (!Buffer.isBuffer(pfxBuffer) || !pfxBuffer.length) throw new Error('Arquivo de certificado invalido.');
+  // Tenta node-forge
+  try {
+    return openPfxForge(pfxBuffer, senha);
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    if (/mac|password|senha/i.test(msg) && !/unsupported/i.test(msg)) {
+      throw new Error('Senha do certificado incorreta ou arquivo .pfx invalido.');
+    }
+    console.warn('[FIREBASE-CERT] node-forge falhou (' + msg + '). Tentando OpenSSL...');
+  }
+  // Fallback OpenSSL
+  try {
+    const viaSsl = openPfxWithOpenssl(pfxBuffer, senha);
+    return {
+      privateKeyPem: viaSsl.privateKeyPem,
+      certPem: viaSsl.certPem,
+      chainPem: viaSsl.chainPem,
+      info: infoFromCertPem(viaSsl.certPem),
+    };
+  } catch (e2) {
+    throw new Error(String((e2 && e2.message) || e2));
+  }
+}
+
+// === CRUD do Firestore ===
+
+/** Salva o certificado no Firebase e carrega em memoria. */
+async function salvarCertificado(pfxBuffer, senha) {
+  if (!pfxBuffer || !pfxBuffer.length) throw new Error('Arquivo .pfx vazio.');
+  if (!senha) throw new Error('Senha do certificado obrigatoria.');
+  initFirebase();
+  if (!db) throw new Error('Firebase nao inicializado. Configure as variaveis de ambiente.');
+
+  // Valida a senha antes de persistir
+  const aberto = openPfx(pfxBuffer, senha);
+
+  // Monta documento para o Firestore
+  const doc = {
+    pfxBase64: pfxBuffer.toString('base64'),
+    senhaCifrada: encryptSenha(senha),
+    info: aberto.info,
+    uploadEm: new Date().toISOString(),
+    atualizadoEm: new Date().toISOString(),
+  };
+
+  await db.collection(config.firebase.collection).doc(config.firebase.doc_id).set(doc);
+
+  // Atualiza cache
+  cache = {
+    pfx: pfxBuffer,
+    senha: String(senha),
+    privateKeyPem: aberto.privateKeyPem,
+    certPem: aberto.certPem,
+    chainPem: aberto.chainPem,
+    info: aberto.info,
+  };
+
+  console.log('[FIREBASE-CERT] Certificado salvo no Firebase. Titular: ' + aberto.info.titular + ' | CNPJ: ' + aberto.info.cnpj);
+  return aberto.info;
+}
+
+/** Carrega o certificado do Firebase (ou cache em memoria). */
+async function carregarCertificado() {
+  if (cache) return cache;
+  initFirebase();
+  if (!db) {
+    console.warn('[FIREBASE-CERT] Firebase nao disponivel.');
+    return null;
+  }
+
+  try {
+    const snap = await db.collection(config.firebase.collection).doc(config.firebase.doc_id).get();
+    if (!snap.exists) {
+      console.warn('[FIREBASE-CERT] Nenhum certificado encontrado no Firebase.');
+      return null;
+    }
+    const doc = snap.data();
+    if (!doc.pfxBase64 || !doc.senhaCifrada) {
+      console.error('[FIREBASE-CERT] Documento do Firebase esta incompleto.');
+      return null;
+    }
+
+    const pfx = Buffer.from(doc.pfxBase64, 'base64');
+    const senha = decryptSenha(doc.senhaCifrada);
+    const aberto = openPfx(pfx, senha);
+
+    cache = {
+      pfx: pfx,
+      senha: senha,
+      privateKeyPem: aberto.privateKeyPem,
+      certPem: aberto.certPem,
+      chainPem: aberto.chainPem,
+      info: aberto.info,
+    };
+    console.log('[FIREBASE-CERT] Certificado carregado do Firebase. Titular: ' + aberto.info.titular);
+    return cache;
+  } catch (e) {
+    console.error('[FIREBASE-CERT] Erro ao carregar do Firebase:', e.message);
+    return null;
+  }
+}
+
+/** Retorna o status do certificado (nao carrega o PEM, so as infos). */
+async function statusCertificado() {
+  initFirebase();
+  if (!db) return { configurado: false, erro: 'Firebase nao configurado' };
+
+  // Se tem cache, usa o cache
+  if (cache) return Object.assign({ configurado: true, origem: 'cache' }, cache.info);
+
+  try {
+    const snap = await db.collection(config.firebase.collection).doc(config.firebase.doc_id).get();
+    if (!snap.exists) return { configurado: false, mensagem: 'Nenhum certificado A1 no Firebase.' };
+    const doc = snap.data();
+    return Object.assign({ configurado: true, origem: 'firebase', uploadEm: doc.uploadEm }, doc.info);
+  } catch (e) {
+    return { configurado: false, erro: e.message };
+  }
+}
+
+/** Remove o certificado do Firebase e do cache. */
+async function removerCertificado() {
+  initFirebase();
+  if (db) {
+    try {
+      await db.collection(config.firebase.collection).doc(config.firebase.doc_id).delete();
+    } catch (e) { /* ignore */ }
+  }
+  cache = null;
+  console.log('[FIREBASE-CERT] Certificado removido do Firebase e cache.');
+  return true;
+}
+
+module.exports = { salvarCertificado, carregarCertificado, statusCertificado, removerCertificado };
