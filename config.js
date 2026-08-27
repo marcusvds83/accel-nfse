@@ -1,6 +1,6 @@
 /**
- * config.js — Configuracoes do middleware NFS-e Nytro
- * =======================================================
+ * config.js — Configuracoes do middleware NFS-e Nytro (SPED NFS-e)
+ * =================================================================
  * Todas as configuracoes sao lidas de variaveis de ambiente.
  * No Render, defina-as no painel Environment Variables.
  */
@@ -19,43 +19,46 @@ module.exports = {
     doc_id: process.env.FIREBASE_CERT_DOC_ID || 'nytro-a1',
   },
 
-  // === NFS-e ===
+  // === NFS-e SPED ===
   nfse: {
     uf: process.env.NFSE_UF || 'PR',
     cidade: process.env.NFSE_CIDADE || 'Curitiba',
-    codigo_ibge: process.env.NFSE_CODIGO_IBGE || '4106902', // Curitiba
+    codigo_ibge: process.env.NFSE_CODIGO_IBGE || '4106902',
     tp_amb: parseInt(process.env.NFSE_TP_AMB || '2', 10), // 1=producao, 2=homologacao
-    emissao_modo: process.env.NFSE_EMISSAO_MODO || 'proprio', // proprio | sieg
-    serie: process.env.NFSE_SERIE || '1',
+    serie: process.env.NFSE_SERIE || '70000',
+    versao: process.env.NFSE_VERSAO || '1.01',
+    ver_aplic: process.env.NFSE_VER_APLIC || 'nfse-nytro_1.0.0',
+    inscricao_municipal: process.env.NFSE_IM || '080212854094',
+    // Regime tributario (Simples Nacional)
+    op_simp_nac: parseInt(process.env.NFSE_OP_SIMP_NAC || '3', 10), // 3=Simples Nacional
+    reg_ap_trib_sn: parseInt(process.env.NFSE_REG_AP_TRIB_SN || '1', 10),
+    reg_esp_trib: parseInt(process.env.NFSE_REG_ESP_TRIB || '0', 10),
+    // Codigo de servico padrao (LC 116 / NBS)
+    c_trib_nac_padrao: process.env.NFSE_C_TRIB_NAC || '080201',
+    c_nbs_padrao: process.env.NFSE_C_NBS || '122051900',
+    // Aliquota ISS
+    aliquota_iss: parseFloat(process.env.NFSE_ALIQUOTA_ISS || '5.00'),
+    // Carga tributaria total SN
+    p_tot_trib_sn: parseFloat(process.env.NFSE_P_TOT_TRIB_SN || '6.00'),
   },
 
-  // === Odoo (autenticacao via API Key) ===
+  // === Odoo (autenticacao via email + API Key) ===
   odoo: {
     enabled: process.env.ODOO_ENABLED === '1',
     url: process.env.ODOO_URL || '',
     db: process.env.ODOO_DB || '',
+    user: process.env.ODOO_USER || '', // email de login
     api_key: process.env.ODOO_API_KEY || '',
     polling_interval_ms: parseInt(process.env.ODOO_POLLING_MS || '15000', 10),
   },
 
-  // === Webservice da Prefeitura (Curitiba - ABRASF v2) ===
-  // URLs serao definidas quando confirmarmos o provedor municipal
+  // === Webservice SPED NFS-e ===
   prefeitura: {
-    homologacao: {
-      receber_lote: process.env.PREF_HOM_RECEBER_LOTE || '',
-      consultar_lote: process.env.PREF_HOM_CONSULTAR_LOTE || '',
-      consultar_nfse: process.env.PREF_HOM_CONSULTAR_NFSE || '',
-      cancelar_nfse: process.env.PREF_HOM_CANCELAR_NFSE || '',
-    },
-    producao: {
-      receber_lote: process.env.PREF_PROD_RECEBER_LOTE || '',
-      consultar_lote: process.env.PREF_PROD_CONSULTAR_LOTE || '',
-      consultar_nfse: process.env.PREF_PROD_CONSULTAR_NFSE || '',
-      cancelar_nfse: process.env.PREF_PROD_CANCELAR_NFSE || '',
-    },
+    homologacao: process.env.PREF_HOM_URL || 'https://homologacao.nfse.gov.br/ws/NfseServico/NfseServico.svc',
+    producao: process.env.PREF_PROD_URL || 'https://nfse.gov.br/ws/NfseServico/NfseServico.svc',
   },
 
   // === Seguranca ===
   tls_insecure: process.env.NFSE_TLS_INSECURE === '1',
-  status_on_error: process.env.NFSE_STATUS_ON_ERROR || 'erro', // erro | pendente
+  status_on_error: process.env.NFSE_STATUS_ON_ERROR || 'erro',
 };
