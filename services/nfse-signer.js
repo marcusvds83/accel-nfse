@@ -12,7 +12,6 @@
 
 const { DOMParser, XMLSerializer } = require('@xmldom/xmldom');
 const crypto = require('crypto');
-const forge = require('node-forge');
 
 const NS_DSIG = 'http://www.w3.org/2000/09/xmldsig#';
 const NS_SPED = 'http://www.sped.fazenda.gov.br/nfse';
@@ -141,7 +140,11 @@ async function assinarXml(xmlString, cert) {
     `</Reference>` +
     `</SignedInfo>`;
 
-  const signedInfoC14n = canonicalizeC14N({ textContent: signedInfoForSig });
+  // C14N simplificado sobre string (remove espacos entre tags)
+  const signedInfoC14n = signedInfoForSig
+    .replace(/>\s+</g, '><')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   // 5. Assina com RSA-SHA256
   const signatureValue = rsaSha256Sign(privateKeyPem, signedInfoC14n);
