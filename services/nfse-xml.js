@@ -109,7 +109,7 @@ function gerarXmlDPS(dados) {
   const { move, company, partner, lines, products, nDPS } = dados;
   const c = config.nfse;
 
-  const cnpjPrest = limpaDoc(company.cnpj_cpf);
+  const cnpjPrest = limpaDoc(company._cnpj);
   const ibge = c.codigo_ibge;
   const serie = c.serie;
   const dhEmi = fmtDataHora(move.invoice_date);
@@ -123,7 +123,7 @@ function gerarXmlDPS(dados) {
   const emailPrest = company.email || '';
 
   // --- Tomador ---
-  const docTomador = limpaDoc(partner.cnpj_cpf || '');
+  const docTomador = limpaDoc(partner._cnpj || partner.vat || '');
   const isCpfTomador = docTomador.length === 11;
   const docTomadorTag = isCpfTomador ? 'CPF' : 'CNPJ';
   const nomeTomador = partner.legal_name || partner.name || '';

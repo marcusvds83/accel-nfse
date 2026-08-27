@@ -29,12 +29,12 @@ function createClient(url) {
 
 function authenticate(client) {
   const db = config.odoo.db;
-  const user = config.odoo.user; // email de login
+  const user = config.odoo.user;
   const key = config.odoo.api_key;
   return new Promise((resolve, reject) => {
     client.common.methodCall('authenticate', [db, user, key, {}], (err, uid) => {
       if (err) reject(new Error('Auth Odoo falhou: ' + (err.message || JSON.stringify(err))));
-      else if (uid === false || uid === null) reject(new Error('API Key Odoo invalida. Verifique ODOO_USER e ODOO_API_KEY.'));
+      else if (uid === false || uid === null) reject(new Error('API Key Odoo invalida.'));
       else resolve(uid);
     });
   });
@@ -51,6 +51,38 @@ function executeKw(client, db, uid, model, method, args, kwargs) {
 
 function readFields(client, db, uid, model, ids, fields) {
   return executeKw(client, db, uid, model, 'read', [ids], { fields });
+}
+
+/**
+ * Descobre qual campo de CNPJ/CPF usar no modelo.
+ * Prioridade: cnpj_cpf (l10n_br) > x_nytro_cnpj > vat > company_registry
+ */
+async function descobrirCampoCnpj(client, db, uid, model, ids, fallbackValue) {
+  const camposPossiveis = ['cnpj_cpf', 'x_nytro_cnpj', 'vat', 'company_registry'];
+  const camposModelo = await executeKw(client, db, uid, 'ir.model.fields', 'search_read',
+    [[['model', '=', model], ['name', 'in', camposPossiveis]]],
+    { fields: ['name'] }
+  );
+  const camposExistentes = camposModelo.map(f => f.name);
+  for (const c of camposPossiveis) {
+    if (camposExistentes.includes(c)) return c;
+  }
+  return null; // nenhum campo existe
+}
+
+/**
+ * Le CNPJ/CPF de um registro, tentando multiplos campos.
+ * Retorna string so com digitos.
+ */
+function extrairCnpj(record, campoCnpj, fallbackConfig) {
+  if (campoCnpj && record[campoCnpj]) {
+    return String(record[campoCnpj]).replace(/[^0-9]/g, '');
+  }
+  // Fallback: usar CNPJ da config (prestador)
+  if (fallbackConfig) {
+    return String(fallbackConfig).replace(/[^0-9]/g, '');
+  }
+  return '';
 }
 
 // === Processar emissões pendentes ===
@@ -116,35 +148,49 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     throw new Error('Certificado A1 nao encontrado no Firebase. Faca upload via POST /api/v1/nfse/certificado');
   }
 
-  // 3. Leitura dos dados da fatura
+  // 3. Descobrir campos de CNPJ disponiveis
+  const campoCnpjCompany = await descobrirCampoCnpj(client, db, uid, 'res.company', [1]);
+  const campoCnpjPartner = await descobrirCampoCnpj(client, db, uid, 'res.partner', [1]);
+  console.log('[NFSE-EMIT] Campo CNPJ company:', campoCnpjCompany, '| partner:', campoCnpjPartner);
+
+  // 4. Leitura dos dados da fatura (campos que sempre existem)
   const moves = await readFields(client, db, uid, 'account.move', [moveId], [
     'name', 'partner_id', 'company_id', 'invoice_date', 'amount_total', 'amount_untaxed',
     'amount_tax', 'narration', 'payment_reference', 'invoice_line_ids',
   ]);
   const move = moves[0];
 
-  // 4. Leitura da empresa
-  const companies = await readFields(client, db, uid, 'res.company', [move.company_id[0]], [
-    'name', 'cnpj_cpf', 'street', 'street2', 'number', 'city_id', 'state_id', 'zip',
-    'phone', 'email', 'district',
-  ]);
+  // 5. Leitura da empresa (usando campo descoberto)
+  const camposCompany = ['name', 'street', 'street2', 'city_id', 'state_id', 'zip',
+    'phone', 'email', 'district', 'country_id', 'state_id'];
+  if (campoCnpjCompany) camposCompany.push(campoCnpjCompany);
+  // Adiciona campos custom NFS-e da empresa
+  camposCompany.push('x_nytro_nfse_dados_prestador_im', 'x_nytro_nfse_numero');
+
+  const companies = await readFields(client, db, uid, 'res.company', [move.company_id[0]], camposCompany);
   const company = companies[0];
 
-  // 5. Leitura do parceiro (tomador)
-  const partners = await readFields(client, db, uid, 'res.partner', [move.partner_id[0]], [
-    'name', 'cnpj_cpf', 'street', 'street2', 'number', 'city_id', 'state_id', 'zip',
-    'phone', 'email', 'inscr_est', 'legal_name', 'district',
-  ]);
+  // Extrai CNPJ da empresa
+  company._cnpj = extrairCnpj(company, campoCnpjCompany, '63820783000170');
+
+  // 6. Leitura do parceiro (tomador) - sem cnpj_cpf!
+  const camposPartner = ['name', 'street', 'street2', 'city_id', 'state_id', 'zip',
+    'phone', 'email', 'legal_name', 'district', 'country_id', 'vat'];
+  if (campoCnpjPartner) camposPartner.push(campoCnpjPartner);
+
+  const partners = await readFields(client, db, uid, 'res.partner', [move.partner_id[0]], camposPartner);
   const partner = partners[0];
 
-  // 6. Leitura das linhas de servico (apenas display_type=false)
+  // Extrai CNPJ do tomador
+  partner._cnpj = extrairCnpj(partner, campoCnpjPartner, null);
+
+  // 7. Leitura das linhas de servico
   const allLines = await readFields(client, db, uid, 'account.move.line', move.invoice_line_ids, [
     'name', 'quantity', 'price_unit', 'price_subtotal', 'product_id', 'tax_ids', 'display_type',
   ]);
-  const lines = allLines.filter(l => l.display_type !== false || (l.display_type === false && l.product_id));
   const serviceLines = allLines.filter(l => !l.display_type && l.price_subtotal > 0);
 
-  // 7. Leitura dos produtos
+  // 8. Leitura dos produtos (product.template, nao product.product)
   const productIds = serviceLines.filter(l => l.product_id).map(l => l.product_id[0]).filter(Boolean);
   const products = productIds.length
     ? await readFields(client, db, uid, 'product.product', productIds, [
@@ -156,11 +202,8 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
   const productMap = {};
   products.forEach(p => { productMap[p.id] = p; });
 
-  // 8. Incrementa numeracao na empresa
-  const companyRead = await readFields(client, db, uid, 'res.company', [company.id], [
-    'x_nytro_nfse_numero',
-  ]);
-  const ultimoNumero = (companyRead[0].x_nytro_nfse_numero) || 0;
+  // 9. Incrementa numeracao na empresa
+  const ultimoNumero = company.x_nytro_nfse_numero || 0;
   const proximoNumero = ultimoNumero + 1;
   await executeKw(client, db, uid, 'res.company', 'write', [[company.id], {
     x_nytro_nfse_numero: proximoNumero,
@@ -168,7 +211,7 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
 
   console.log('[NFSE-EMIT] Fatura ' + move.name + ' (move_id=' + moveId + ') nDPS=' + proximoNumero);
 
-  // 9. Gera XML DPS
+  // 10. Gera XML DPS
   const { xml: dpsXml, infDpsId } = gerarXmlDPS({
     move, company, partner,
     lines: serviceLines,
@@ -176,16 +219,16 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     nDPS: proximoNumero,
   });
 
-  // 10. Assina o XML
+  // 11. Assina o XML
   const dpsAssinado = await assinarXml(dpsXml, {
     privateKeyPem: cert.privateKeyPem,
     certPem: cert.certPem,
   });
 
-  // 11. Envia para o SPED
+  // 12. Envia para o SPED
   const resultado = await enviarDPS(dpsAssinado, cert);
 
-  // 12. Atualiza o Odoo com o resultado
+  // 13. Atualiza o Odoo com o resultado
   if (resultado.sucesso) {
     const updateData = {
       x_nytro_nfse_status: 'autorizada',
@@ -196,14 +239,11 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
       x_nytro_nfse_erro: false,
       x_nytro_nfse_mensagem: false,
     };
-    // Salva XML de retorno (limitado a 50K chars por causa do campo text)
     if (resultado.xmlRetorno && resultado.xmlRetorno.length < 50000) {
       updateData.x_nytro_nfse_xml = resultado.xmlRetorno;
     }
-
     await executeKw(client, db, uid, 'account.move', 'write', [[moveId], updateData]);
 
-    // Mensagem no chatter
     await executeKw(client, db, uid, 'mail.message', 'create', [{
       model: 'account.move',
       res_id: moveId,
@@ -218,7 +258,6 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     return { sucesso: true, nNFSe: resultado.nNFSe, nDFSe: resultado.nDFSe };
 
   } else {
-    // Rejeitada
     const motivo = resultado.xMotivo || 'Erro desconhecido';
     await safeUpdateError(client, db, uid, moveId,
       'NFS-e rejeitada: ' + motivo + ' (cStat=' + (resultado.cStat || 0) + ')');
