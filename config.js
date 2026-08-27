@@ -52,10 +52,13 @@ module.exports = {
     polling_interval_ms: parseInt(process.env.ODOO_POLLING_MS || '15000', 10),
   },
 
-  // === Webservice SPED NFS-e ===
-  prefeitura: {
-    homologacao: process.env.PREF_HOM_URL || 'https://homologacao.nfse.fazenda.gov.br/ws/NfseServico/NfseServico.svc',
-    producao: process.env.PREF_PROD_URL || 'https://nfse.fazenda.gov.br/ws/NfseServico/NfseServico.svc',
+  // === API REST SEFIN NFS-e (desde 01/10/2025 — substituiu SOAP) ===
+  // Homologacao (Producao Restrita): https://sefin.producaorestrita.nfse.gov.br/SefinNacional/
+  // Producao: https://sefin.nfse.gov.br/SefinNacional/
+  // Formato: JSON com XML DPS compactado em GZip+Base64, mTLS
+  sefin: {
+    homologacao: process.env.SEFIN_HOM_URL || 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional',
+    producao: process.env.SEFIN_PROD_URL || 'https://sefin.nfse.gov.br/SefinNacional',
   },
 
   // === Seguranca ===

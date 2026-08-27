@@ -1,23 +1,22 @@
 /**
- * services/nfse-client.js — Cliente SOAP do SPED NFS-e
- * ======================================================
- * Comunica com o webservice nacional SPED NFS-e (nfse.gov.br)
- * usando SOAP 1.2 com XML assinado.
+ * services/nfse-client.js — Cliente REST da API SEFIN NFS-e Nacional
+ * ==================================================================
+ * Desde 01/10/2025 a NFS-e Nacional migrou de SOAP para REST API.
+ * O DPS XML (SPED v1.01) e enviado como JSON com campo dpsXmlGZipB64
+ * (XML compactado em GZip + representacao base64binary).
+ * Autenticacao: mTLS com certificado A1 ICP-Brasil.
  */
 
 const axios = require('axios');
 const https = require('https');
+const zlib = require('zlib');
 const config = require('../config');
-const { carregarCertificado } = require('./firebase-cert');
 
-const SOAP_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SPED_NS = 'http://www.sped.fazenda.gov.br/nfse';
-
-/** Retorna o endpoint conforme ambiente */
-function getEndpoint() {
+/** Retorna a base URL conforme ambiente */
+function getBaseUrl() {
   return config.nfse.tp_amb === 1
-    ? config.prefeitura.producao
-    : config.prefeitura.homologacao;
+    ? config.sefin.producao
+    : config.sefin.homologacao;
 }
 
 /** Cria agente HTTPS com certificado A1 (mTLS) */
@@ -25,7 +24,7 @@ function createHttpsAgent(cert) {
   if (!cert) return null;
   const tlsOpts = { rejectUnauthorized: !config.tls_insecure };
 
-  // 1. Tenta PFX com senha correta (mais confiavel)
+  // 1. Tenta PFX com senha
   if (cert.pfx) {
     console.log('[NFSE-CLIENT] Usando PFX para mTLS (pfx=' + cert.pfx.length + ' bytes, senha=' + (cert.senha ? 'sim' : 'nao') + ')');
     return new https.Agent({ ...tlsOpts, pfx: cert.pfx, passphrase: cert.senha || '' });
@@ -42,77 +41,165 @@ function createHttpsAgent(cert) {
 }
 
 /**
- * Envia DPS assinado para o SPED NFS-e.
- * @param {string} dpsXmlAssinado - XML DPS completo com assinatura
- * @param {object} cert - { pfx, certPem, chainPem, privateKeyPem }
- * @returns {object} { sucesso, cStat, xMotivo, nNFSe, nDFSe, xmlRetorno }
+ * Comprime string em GZip e retorna Base64.
+ * @param {string} str - String a comprimir (geralmente XML)
+ * @returns {string} Base64 do GZip
+ */
+function gzipBase64(str) {
+  return new Promise((resolve, reject) => {
+    zlib.gzip(Buffer.from(str, 'utf-8'), (err, compressed) => {
+      if (err) return reject(err);
+      resolve(compressed.toString('base64'));
+    });
+  });
+}
+
+/**
+ * Descomprime Base64 GZip para string.
+ * @param {string} b64 - Base64 do GZip
+ * @returns {string} String descomprimida
+ */
+function gunzipBase64(b64) {
+  return new Promise((resolve, reject) => {
+    const buf = Buffer.from(b64, 'base64');
+    zlib.gunzip(buf, (err, decompressed) => {
+      if (err) return reject(err);
+      resolve(decompressed.toString('utf-8'));
+    });
+  });
+}
+
+/**
+ * Envia DPS assinado para a API REST SEFIN NFS-e.
+ * @param {string} dpsXmlAssinado - XML DPS completo com assinatura XMLDSIG
+ * @param {object} cert - { pfx, certPem, chainPem, privateKeyPem, senha }
+ * @returns {object} { sucesso, chaveAcesso, idDps, nfseXml, erros, xmlRetorno }
  */
 async function enviarDPS(dpsXmlAssinado, cert) {
-  const endpoint = getEndpoint();
-  if (!endpoint) {
-    return { sucesso: false, cStat: 0, xMotivo: 'Endpoint SPED NFS-e nao configurado' };
-  }
+  const baseUrl = getBaseUrl();
+  const url = baseUrl + '/nfse';
 
-  console.log('[NFSE-CLIENT] Enviando DPS para ' + endpoint);
-
-  // Monta SOAP envelope
-  const soapEnvelope =
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<soapenv:Envelope xmlns:soapenv="${SOAP_NS}" xmlns:nfse="${SPED_NS}">` +
-    `<soapenv:Header/>` +
-    `<soapenv:Body>` +
-    `<nfse:ReceberDPS>` +
-    `<nfse:nfseCabecMsg><![CDATA[<?xml version="1.0" encoding="UTF-8"?><cabecMsg xmlns="${SPED_NS}" versao="${config.nfse.versao}"><versaoDados>${config.nfse.versao}</versaoDados></cabecMsg>]]></nfse:nfseCabecMsg>` +
-    `<nfse:nfseDadosMsg><![CDATA[${dpsXmlAssinado}]]></nfse:nfseDadosMsg>` +
-    `</nfse:ReceberDPS>` +
-    `</soapenv:Body>` +
-    `</soapenv:Envelope>`;
+  console.log('[NFSE-CLIENT] Enviando DPS para ' + url);
+  console.log('[NFSE-CLIENT] XML DPS assinado: ' + dpsXmlAssinado.length + ' bytes');
 
   try {
+    // 1. Comprime XML DPS em GZip + Base64
+    const dpsGzipB64 = await gzipBase64(dpsXmlAssinado);
+    console.log('[NFSE-CLIENT] DPS GZip+Base64: ' + dpsGzipB64.length + ' chars');
+
+    // 2. Monta body JSON
+    const body = {
+      dpsXmlGZipB64: dpsGzipB64,
+    };
+
+    // 3. Envia POST com mTLS
     const httpsAgent = createHttpsAgent(cert);
-    const response = await axios.post(endpoint, soapEnvelope, {
+    const response = await axios.post(url, body, {
       headers: {
-        'Content-Type': 'application/soap+xml; charset=utf-8',
-        'SOAPAction': '"' + SPED_NS + '/NfseServico/ReceberDPS"',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
       },
       httpsAgent: httpsAgent || undefined,
       timeout: 30000,
-      // Aceita auto-signed certs em homologacao
       rejectUnauthorized: !config.tls_insecure,
+      // Nao transforma resposta (precisamos do JSON cru)
+      transformResponse: [data => data],
     });
 
-    const xmlRetorno = response.data;
-    console.log('[NFSE-CLIENT] Resposta recebida (' + (xmlRetorno || '').length + ' bytes)');
+    // 4. Parseia resposta JSON
+    let respJson;
+    const contentType = response.headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      if (typeof response.data === 'string') {
+        respJson = JSON.parse(response.data);
+      } else {
+        respJson = response.data;
+      }
+    } else {
+      // Resposta inesperada — retorna como erro
+      const txt = typeof response.data === 'string' ? response.data.substring(0, 500) : JSON.stringify(response.data).substring(0, 500);
+      console.error('[NFSE-CLIENT] Resposta inesperada (HTTP ' + response.status + '): ' + txt);
+      return {
+        sucesso: false,
+        cStat: 0,
+        xMotivo: 'Resposta inesperada do servidor: HTTP ' + response.status,
+        httpStatus: response.status,
+      };
+    }
 
-    // Parseia resposta - procura por cStat e xMotivo
-    const cStatMatch = (xmlRetorno || '').match(/<cStat>(\d+)<\/cStat>/);
-    const xMotivoMatch = (xmlRetorno || '').match(/<xMotivo>([^<]+)<\/xMotivo>/);
-    const nNFSeMatch = (xmlRetorno || '').match(/<nNFSe>(\d+)<\/nNFSe>/);
-    const nDFSeMatch = (xmlRetorno || '').match(/<nDFSe>(\d+)<\/nDFSe>/);
-    const nProtMatch = (xmlRetorno || '').match(/<nProt>([^<]*)<\/nProt>/);
+    console.log('[NFSE-CLIENT] Resposta HTTP ' + response.status + ' tipoAmbiente=' + respJson.tipoAmbiente);
 
-    const cStat = cStatMatch ? parseInt(cStatMatch[1], 10) : 0;
-    const xMotivo = xMotivoMatch ? xMotivoMatch[1] : 'Sem motivo';
-    const nNFSe = nNFSeMatch ? nNFSeMatch[1] : null;
-    const nDFSe = nDFSeMatch ? nDFSeMatch[1] : null;
+    // 5. Verifica se ha erros na resposta
+    if (respJson.erros && respJson.erros.length > 0) {
+      const errosMsg = respJson.erros.map(e =>
+        '[' + (e.codigo || '?') + '] ' + (e.descricao || e.mensagem || '') + (e.complemento ? ' — ' + e.complemento : '')
+      ).join('; ');
+      console.error('[NFSE-CLIENT] Rejeicao SEFIN: ' + errosMsg);
+      return {
+        sucesso: false,
+        cStat: 0,
+        xMotivo: errosMsg,
+        erros: respJson.erros,
+        idDps: respJson.idDps || null,
+      };
+    }
 
-    // cStat 100 = autorizado (SPED)
-    const sucesso = cStat === 100;
+    // 6. Sucesso! Extrai dados da NFS-e
+    if (respJson.chaveAcesso) {
+      let nfseXml = null;
+      if (respJson.nfseXmlGZipB64) {
+        try {
+          nfseXml = await gunzipBase64(respJson.nfseXmlGZipB64);
+          console.log('[NFSE-CLIENT] NFS-e XML descompactado: ' + nfseXml.length + ' bytes');
+        } catch (e) {
+          console.warn('[NFSE-CLIENT] Falha ao descompactar NFS-e XML:', e.message);
+        }
+      }
 
-    console.log('[NFSE-CLIENT] cStat=' + cStat + ' xMotivo=' + xMotivo + ' nNFSe=' + nNFSe);
+      // Extrai numero da NFS-e e codigo verificacao do XML
+      let nNFSe = null;
+      let nDFSe = null;
+      if (nfseXml) {
+        const nNFSeMatch = nfseXml.match(/<Numero>(\d+)<\/Numero>/);
+        const nDFSeMatch = nfseXml.match(/<CodigoVerificacao>([^<]+)<\/CodigoVerificacao>/);
+        if (nNFSeMatch) nNFSe = nNFSeMatch[1];
+        if (nDFSeMatch) nDFSe = nDFSeMatch[1];
+      }
 
+      console.log('[NFSE-CLIENT] NFS-e autorizada! Chave=' + respJson.chaveAcesso + ' Numero=' + nNFSe);
+
+      // Alertas informativos (nao sao erros)
+      if (respJson.alertas && respJson.alertas.length > 0) {
+        console.log('[NFSE-CLIENT] Alertas: ' + respJson.alertas.map(a => a.mensagem || a.descricao).join('; '));
+      }
+
+      return {
+        sucesso: true,
+        cStat: 100,
+        xMotivo: 'NFS-e autorizada',
+        chaveAcesso: respJson.chaveAcesso,
+        idDps: respJson.idDps,
+        nNFSe: nNFSe,
+        nDFSe: nDFSe,
+        dataHoraProcessamento: respJson.dataHoraProcessamento,
+        nfseXml: nfseXml,
+        xmlRetorno: nfseXml,
+        alertas: respJson.alertas || [],
+      };
+    }
+
+    // Resposta sem chave de acesso e sem erros
+    console.warn('[NFSE-CLIENT] Resposta sem chaveAcesso e sem erros:', JSON.stringify(respJson).substring(0, 300));
     return {
-      sucesso,
-      cStat,
-      xMotivo,
-      nNFSe,
-      nDFSe,
-      nProt: nProtMatch ? nProtMatch[1] : null,
-      xmlRetorno,
+      sucesso: false,
+      cStat: 0,
+      xMotivo: 'Resposta sem chave de acesso',
+      respostaOriginal: respJson,
     };
+
   } catch (err) {
     const msg = err.response
-      ? `HTTP ${err.response.status}: ${(err.response.data || '').substring(0, 300)}`
+      ? 'HTTP ' + err.response.status + ': ' + (typeof err.response.data === 'string' ? err.response.data.substring(0, 500) : JSON.stringify(err.response.data).substring(0, 500))
       : err.message;
     console.error('[NFSE-CLIENT] Erro ao enviar DPS:', msg);
     return { sucesso: false, cStat: 0, xMotivo: msg };
@@ -120,67 +207,90 @@ async function enviarDPS(dpsXmlAssinado, cert) {
 }
 
 /**
- * Consulta uma NFS-e pelo numero.
+ * Consulta uma NFS-e pela chave de acesso (50 digitos).
+ * GET /SefinNacional/nfse/{chaveAcesso}
  */
-async function consultarNfse(numero, cert) {
-  const endpoint = getEndpoint();
-  if (!endpoint) {
-    return { sucesso: false, cStat: 0, xMotivo: 'Endpoint nao configurado' };
-  }
-
-  const cnpjPrest = config.odoo.cnpj_prestador || '';
-  const ibge = config.nfse.codigo_ibge;
-
-  const soapEnvelope =
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<soapenv:Envelope xmlns:soapenv="${SOAP_NS}" xmlns:nfse="${SPED_NS}">` +
-    `<soapenv:Header/>` +
-    `<soapenv:Body>` +
-    `<nfse:ConsultarNfse>` +
-    `<nfse:nfseCabecMsg><![CDATA[<?xml version="1.0" encoding="UTF-8"?><cabecMsg xmlns="${SPED_NS}" versao="${config.nfse.versao}"><versaoDados>${config.nfse.versao}</versaoDados></cabecMsg>]]></nfse:nfseCabecMsg>` +
-    `<nfse:nfseDadosMsg><![CDATA[<?xml version="1.0" encoding="UTF-8"?><consNfse xmlns="${SPED_NS}" versao="${config.nfse.versao}"><cnpjPrestador>${cnpjPrest}</cnpjPrestador><nNFSe>${numero}</nNFSe></consNfse>]]></nfse:nfseDadosMsg>` +
-    `</nfse:ConsultarNfse>` +
-    `</soapenv:Body>` +
-    `</soapenv:Envelope>`;
+async function consultarNfse(chaveAcesso, cert) {
+  const baseUrl = getBaseUrl();
+  const url = baseUrl + '/nfse/' + chaveAcesso;
 
   try {
     const httpsAgent = createHttpsAgent(cert);
-    const response = await axios.post(endpoint, soapEnvelope, {
+    const response = await axios.get(url, {
       headers: {
-        'Content-Type': 'application/soap+xml; charset=utf-8',
+        'Accept': 'application/json',
       },
       httpsAgent: httpsAgent || undefined,
       timeout: 15000,
       rejectUnauthorized: !config.tls_insecure,
+      transformResponse: [data => data],
     });
 
-    return {
-      sucesso: true,
-      xmlRetorno: response.data,
-    };
+    let respJson = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+
+    // Descomprime XML da NFS-e se presente
+    if (respJson.nfseXmlGZipB64) {
+      try {
+        respJson.nfseXml = await gunzipBase64(respJson.nfseXmlGZipB64);
+      } catch (e) {
+        console.warn('[NFSE-CLIENT] Falha ao descompactar consulta:', e.message);
+      }
+    }
+
+    return { sucesso: true, dados: respJson };
   } catch (err) {
     return { sucesso: false, cStat: 0, xMotivo: err.message };
   }
 }
 
 /**
- * Testa conexao com o webservice SPED.
+ * Consulta DPS pelo ID para obter chave de acesso.
+ * GET /SefinNacional/dps/{id}
  */
-async function testarConexao(cert) {
-  const endpoint = getEndpoint();
-  if (!endpoint) {
-    return { online: false, mensagem: 'Endpoint nao configurado' };
-  }
+async function consultarDps(idDps, cert) {
+  const baseUrl = getBaseUrl();
+  const url = baseUrl + '/dps/' + idDps;
 
   try {
-    await axios.get(endpoint.replace(/NfseServico\.svc.*/, '') + '?wsdl', {
-      timeout: 10000,
+    const httpsAgent = createHttpsAgent(cert);
+    const response = await axios.get(url, {
+      headers: { 'Accept': 'application/json' },
+      httpsAgent: httpsAgent || undefined,
+      timeout: 15000,
       rejectUnauthorized: !config.tls_insecure,
+      transformResponse: [data => data],
     });
-    return { online: true, mensagem: 'Conexao OK com ' + endpoint };
+
+    let respJson = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+    return { sucesso: true, dados: respJson };
   } catch (err) {
-    return { online: false, mensagem: 'Falha: ' + err.message.substring(0, 100) };
+    return { sucesso: false, xMotivo: err.message };
   }
 }
 
-module.exports = { enviarDPS, consultarNfse, testarConexao, getEndpoint };
+/**
+ * Testa conexao com a API SEFIN.
+ */
+async function testarConexao(cert) {
+  const baseUrl = getBaseUrl();
+  const url = baseUrl + '/nfse';
+
+  try {
+    // Tenta um GET simples no endpoint base (deve retornar 405 Method Not Allowed ou similar, mas prova que DNS + TLS funciona)
+    const httpsAgent = createHttpsAgent(cert);
+    await axios.get(baseUrl, {
+      httpsAgent: httpsAgent || undefined,
+      timeout: 10000,
+      rejectUnauthorized: !config.tls_insecure,
+    });
+    return { online: true, mensagem: 'Conexao OK com ' + baseUrl };
+  } catch (err) {
+    // 404/405 indica que o servidor respondeu (DNS + TLS OK)
+    if (err.response && (err.response.status === 404 || err.response.status === 405 || err.response.status === 401)) {
+      return { online: true, mensagem: 'Servidor SEFIN acessivel em ' + baseUrl + ' (HTTP ' + err.response.status + ')' };
+    }
+    return { online: false, mensagem: 'Falha: ' + err.message.substring(0, 150) };
+  }
+}
+
+module.exports = { enviarDPS, consultarNfse, consultarDps, testarConexao, getBaseUrl };

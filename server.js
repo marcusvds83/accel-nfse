@@ -78,7 +78,8 @@ app.listen(config.port, () => {
   console.log('=== NFS-e Nytro Middleware ===');
   console.log('Porta: ' + config.port);
   console.log('Cidade: ' + config.nfse.cidade + '/' + config.nfse.uf);
-  console.log('Ambiente: ' + (config.nfse.tp_amb === 1 ? 'PRODUCAO' : 'HOMOLOGACAO'));
+  console.log('Ambiente: ' + (config.nfse.tp_amb === 1 ? 'PRODUCAO' : 'HOMOLOGACAO (Producao Restrita)'));
+  console.log('API SEFIN: ' + (config.nfse.tp_amb === 1 ? config.sefin.producao : config.sefin.homologacao));
   console.log('Firebase: ' + (config.firebase.project_id || 'NAO configurado'));
   console.log('Odoo: ' + (config.odoo.enabled ? config.odoo.url : 'desabilitado'));
   console.log('============================');

@@ -154,7 +154,7 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
 
   // 2. Carrega certificado A1 do Firebase
   const cert = await carregarCertificado();
-  if (!cert || !cert.privateKeyPem) {
+  if (!cert || (!cert.pfx && !cert.privateKeyPem)) {
     throw new Error('Certificado A1 nao encontrado no Firebase. Faca upload via POST /api/v1/nfse/certificado');
   }
 
@@ -279,9 +279,9 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     const updateData = {
       x_nytro_nfse_status: 'autorizada',
       x_nytro_nfse_numero: resultado.nNFSe || String(proximoNumero),
-      x_nytro_nfse_codigo_verificacao: resultado.nDFSe || '',
-      x_nytro_nfse_protocolo: resultado.nProt || '',
-      x_nytro_nfse_data_emissao: new Date().toISOString(),
+      x_nytro_nfse_codigo_verificacao: resultado.chaveAcesso || resultado.nDFSe || '',
+      x_nytro_nfse_protocolo: resultado.idDps || '',
+      x_nytro_nfse_data_emissao: resultado.dataHoraProcessamento || new Date().toISOString(),
       x_nytro_nfse_erro: false,
       x_nytro_nfse_mensagem: false,
     };
@@ -290,18 +290,20 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     }
     await executeKw(client, db, uid, 'account.move', 'write', [[moveId], updateData]);
 
+    const msgBody = '<b>NFS-e Emitida com Sucesso!</b><br/>' +
+      'Numero: <b>' + (resultado.nNFSe || proximoNumero) + '</b><br/>' +
+      'Chave: ' + (resultado.chaveAcesso || '-') + '<br/>' +
+      'DFSe: ' + (resultado.nDFSe || '-') + '<br/>' +
+      'IdDPS: ' + (resultado.idDps || '-');
     await executeKw(client, db, uid, 'mail.message', 'create', [{
       model: 'account.move',
       res_id: moveId,
-      body: '<b>NFS-e Emitida com Sucesso!</b><br/>' +
-            'Numero: <b>' + (resultado.nNFSe || proximoNumero) + '</b><br/>' +
-            'DFSe: ' + (resultado.nDFSe || '-') + '<br/>' +
-            'Protocolo: ' + (resultado.nProt || '-'),
+      body: msgBody,
       message_type: 'comment',
     }]);
 
     console.log('[NFSE-EMIT] NFS-e ' + (resultado.nNFSe || proximoNumero) + ' autorizada para ' + move.name);
-    return { sucesso: true, nNFSe: resultado.nNFSe, nDFSe: resultado.nDFSe };
+    return { sucesso: true, nNFSe: resultado.nNFSe, chaveAcesso: resultado.chaveAcesso, nDFSe: resultado.nDFSe };
 
   } else {
     const motivo = resultado.xMotivo || 'Erro desconhecido';
