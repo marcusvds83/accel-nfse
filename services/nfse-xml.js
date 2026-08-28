@@ -2,15 +2,28 @@
  * services/nfse-xml.js — Gerador de XML DPS (SPED NFS-e v1.01)
  * =============================================================
  * Gera o XML do Documento de Prestacao de Servicos (DPS) no formato
- * do SPED NFS-e, baseado no XML real emitido pela Nytro em Curitiba.
+ * do SPED NFS-e v1.01, conforme XSD oficial:
+ *   https://dl.ellotecnologia.com/NFS-e/Schemas/PadraoNacional/1.01/
+ *
+ * Estrutura XSD (TCInfDPS -> ordem estrita):
+ *   tpAmb, dhEmi, verAplic, serie, nDPS, dCompet, tpEmit,
+ *   [cMotivoEmisTI], [chNFSeRej], cLocEmi, [subst],
+ *   prest (TCInfoPrestador),
+ *   toma (TCInfoPessoa, optional),
+ *   serv (TCServ),
+ *   valores (TCInfoValores),
+ *   [IBSCBS]
+ *
+ * TCInfoPrestador ordem:
+ *   CNPJ/CPF, [CAEPF], [IM], [xNome], [end], [fone], [email], regTrib
+ *
+ * TCInfoPessoa (toma) ordem:
+ *   CNPJ/CPF, [CAEPF], [IM], xNome, [end], [fone], [email]
+ *
+ * TCEndereco ordem:
+ *   endNac/endExt, xLgr, nro, [xCpl], xBairro
  *
  * Namespace: http://www.sped.fazenda.gov.br/nfse
- * Versao: 1.01
- *
- * Mapeamento Odoo -> XML DPS:
- *   res.company    -> prest
- *   res.partner    -> toma
- *   account.move.line -> serv + valores
  */
 
 const config = require('../config');
@@ -30,12 +43,12 @@ function fmtValor(v) {
   return Number(v || 0).toFixed(2);
 }
 
-/** Formata data ISO 8601 com timezone BRT */
+/** Formata data ISO 8601 com timezone */
 function fmtDataHora(d) {
   const dt = d ? new Date(d) : new Date();
-  // Garante formato YYYY-MM-DDTHH:MM:SS-03:00
+  // XSD exige TSDateTimeUTC: AAAA-MM-DDThh:mm:ssTZD
+  // BRT = -03:00
   const iso = dt.toISOString();
-  // toISOString retorna UTC, precisa converter para BRT (-03:00)
   const utcDate = new Date(iso);
   const brtDate = new Date(utcDate.getTime() - 3 * 60 * 60 * 1000);
   const yyyy = brtDate.getUTCFullYear();
@@ -57,12 +70,9 @@ function fmtDataCompet(d) {
   return `${yyyy}-${MM}-${dd}`;
 }
 
-/** Extrai codigo IBGE do city_id do Odoo (tuple [id, name]) */
+/** Extrai codigo IBGE do city_id do Odoo */
 function ibgeFromCity(cityId) {
   if (!cityId) return config.nfse.codigo_ibge;
-  // cityId no Odoo vem como [id, 'Curitiba - PR'] ou similar
-  // O codigo IBGE precisa ser lido do res.city.ibge_code
-  // Por enquanto, retorna o IBGE configurado (Curitiba)
   return config.nfse.codigo_ibge;
 }
 
@@ -70,7 +80,6 @@ function ibgeFromCity(cityId) {
 function extraiNumero(street, street2, number) {
   if (number && String(number).trim()) return String(number).trim();
   if (street2 && String(street2).trim() && /^\d+$/.test(street2.trim())) return street2.trim();
-  // Tenta extrair do proprio street (ex: "RUA BOM JESUS, 212" ou "R BOM JESUS 212")
   const match = String(street || '').match(/[,\s]+(\d+)[\s,]*$/);
   return match ? match[1] : 'S/N';
 }
@@ -92,18 +101,23 @@ function escXml(s) {
     .replace(/'/g, '&apos;');
 }
 
+/** Gera bloco de endereco (TCEndereco) - ordem XSD: endNac/endExt, xLgr, nro, [xCpl], xBairro */
+function xmlEndereco(cMun, cep, xLgr, nro, xBairro, xCpl) {
+  let s = `\n        <end>\n          <endNac>\n            <cMun>${cMun}</cMun>`;
+  if (cep) s += `\n            <CEP>${cep}</CEP>`;
+  s += `\n          </endNac>`;
+  s += `\n          <xLgr>${escXml(xLgr)}</xLgr>`;
+  s += `\n          <nro>${escXml(nro)}</nro>`;
+  if (xCpl) s += `\n          <xCpl>${escXml(xCpl)}</xCpl>`;
+  s += `\n          <xBairro>${escXml(xBairro)}</xBairro>`;
+  s += `\n        </end>`;
+  return s;
+}
+
 // === Gerador do DPS ===
 
 /**
- * Gera o XML DPS (Documento de Prestacao de Servicos).
- * @param {object} dados
- * @param {object} dados.move   - account.move
- * @param {object} dados.company - res.company (Nytro)
- * @param {object} dados.partner - res.partner (tomador)
- * @param {array}  dados.lines  - account.move.line[]
- * @param {object} dados.products - product.product[] (mapa id->product)
- * @param {number} dados.nDPS   - Numero do DPS
- * @returns {string} XML DPS
+ * Gera o XML DPS conforme XSD v1.01 do SPED NFS-e Nacional.
  */
 function gerarXmlDPS(dados) {
   const { move, company, partner, lines, products, nDPS } = dados;
@@ -118,48 +132,55 @@ function gerarXmlDPS(dados) {
   // ID do infDPS (formato do SPED)
   const infDpsId = `DPS${ibge}22${cnpjPrest}${String(serie).padStart(5, '0')}${String(nDPS).padStart(14, '0')}`;
 
-  // --- Prestador ---
+  // --- Prestador (TCInfoPrestador) ---
+  // Ordem XSD: CNPJ, [CAEPF], [IM], [xNome], [end], [fone], [email], regTrib
   const fonePrest = limpaDoc(company.phone || '');
   const emailPrest = company.email || '';
-  // TSTelefone so aceita digitos (10-11), se vazio omite a tag
   const fonePrestXml = fonePrest.length >= 10 ? `\n      <fone>${fonePrest}</fone>` : '';
   const emailPrestXml = emailPrest ? `\n      <email>${escXml(emailPrest)}</email>` : '';
 
-  // --- Tomador ---
+  // Endereco do prestador (opcional no XSD)
+  const logrPrest = limpaLogradouro(company.street);
+  const nroPrest = extraiNumero(company.street, company.street2);
+  const bairroPrest = company.district || company.street2 || '';
+  const cepPrest = limpaDoc(company.zip || '');
+  const endPrestXml = (logrPrest || nroPrest !== 'S/N') ?
+    xmlEndereco(ibge, cepPrest, logrPrest, nroPrest, bairroPrest) : '';
+
+  // --- Tomador (TCInfoPessoa) ---
+  // Ordem XSD: CNPJ/CPF, [CAEPF], [IM], xNome, [end], [fone], [email]
   const docTomador = limpaDoc(partner._cnpj || partner.vat || '');
   const isCpfTomador = docTomador.length === 11;
   const docTomadorTag = isCpfTomador ? 'CPF' : 'CNPJ';
   const nomeTomador = partner.legal_name || partner.name || '';
   const emailTomador = partner.email || '';
+  const foneTomador = limpaDoc(partner.phone || '');
   const nroTomador = extraiNumero(partner.street, partner.street2, partner.number);
   const logrTomador = limpaLogradouro(partner.street);
   const bairroTomador = partner.district || partner.street2 || '';
-  const bairroPrest = company.district || company.street2 || '';
   const cepTomador = limpaDoc(partner.zip || '');
   const ibgeTomador = ibgeFromCity(partner.city_id || partner._cidade);
 
-  // --- Servico ---
-  // Usa dados do primeiro produto, ou padrao da config
+  // --- Servico (TCServ) ---
   const firstProduct = lines[0] && lines[0].product_id ? (products[lines[0].product_id[0]] || {}) : {};
   const cTribNac = firstProduct.x_nytro_codigo_tributacao || c.c_trib_nac_padrao;
   const cNBS = firstProduct.x_nytro_c_nbs || c.c_nbs_padrao;
 
-  // Descricao: concatena nomes das linhas, ou usa x_nytro_descricao_nfse do produto
   let xDescServ = firstProduct.x_nytro_descricao_nfse || '';
   if (!xDescServ) {
     xDescServ = lines.map(l => l.name || '').filter(Boolean).join('; ');
   }
-  // Limita a 2000 caracteres
   if (xDescServ.length > 2000) xDescServ = xDescServ.substring(0, 2000);
 
-  // --- Valores ---
+  // --- Valores (TCInfoValores) ---
+  // Ordem XSD: vServPrest, [vDescCondIncond], [vDedRed], trib
+  // TCVServPrest: [vReceb], vServ
+  // TCInfoTributacao: tribMun, [tribFed], totTrib
   const vServ = fmtValor(move.amount_untaxed || move.amount_total);
+  const issRetido = firstProduct.x_nytro_iss_retido !== false ? '1' : '2';
   const pTotTribSN = fmtValor(c.p_tot_trib_sn);
 
-  // ISS retido? Por default sim (tpRetISSQN=1), pode ser configurado por produto
-  const issRetido = firstProduct.x_nytro_iss_retido !== false ? '1' : '2';
-
-  // --- Monta o XML ---
+  // --- Monta o XML conforme XSD ---
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <DPS versao="${c.versao}" xmlns="${NS}">
   <infDPS Id="${infDpsId}">
@@ -172,27 +193,18 @@ function gerarXmlDPS(dados) {
     <tpEmit>1</tpEmit>
     <cLocEmi>${ibge}</cLocEmi>
     <prest>
-      <CNPJ>${cnpjPrest}</CNPJ>${fonePrestXml}${emailPrestXml}
+      <CNPJ>${cnpjPrest}</CNPJ>
+      <IM>${config.nfse.inscricao_municipal}</IM>
+      <xNome>${escXml(company.name)}</xNome>${endPrestXml}${fonePrestXml}${emailPrestXml}
       <regTrib>
         <opSimpNac>${c.op_simp_nac}</opSimpNac>
         <regApTribSN>${c.reg_ap_trib_sn}</regApTribSN>
         <regEspTrib>${c.reg_esp_trib}</regEspTrib>
       </regTrib>
-      <IM>${config.nfse.inscricao_municipal}</IM>
     </prest>
     <toma>
       <${docTomadorTag}>${docTomador}</${docTomadorTag}>
-      <xNome>${escXml(nomeTomador)}</xNome>
-      <end>
-        <endNac>
-          <cMun>${ibgeTomador}</cMun>
-          <CEP>${cepTomador}</CEP>
-        </endNac>
-        <xLgr>${escXml(logrTomador)}</xLgr>
-        <nro>${escXml(nroTomador)}</nro>
-        <xBairro>${escXml(bairroTomador)}</xBairro>
-      </end>
-      ${emailTomador ? '<email>' + escXml(emailTomador) + '</email>' : ''}
+      <xNome>${escXml(nomeTomador)}</xNome>${xmlEndereco(ibgeTomador, cepTomador, logrTomador, nroTomador, bairroTomador)}${foneTomador.length >= 10 ? '\n      <fone>' + foneTomador + '</fone>' : ''}${emailTomador ? '\n      <email>' + escXml(emailTomador) + '</email>' : ''}
     </toma>
     <serv>
       <locPrest>
@@ -211,16 +223,13 @@ function gerarXmlDPS(dados) {
       <trib>
         <tribMun>
           <tribISSQN>1</tribISSQN>
-          <tpRetISSQN>${issRetido}</tpRetISSQN>
         </tribMun>
-        <tribFed>
-          <piscofins>
-            <CST>00</CST>
-            <tpRetPisCofins>0</tpRetPisCofins>
-          </piscofins>
-        </tribFed>
         <totTrib>
-          <pTotTribSN>${pTotTribSN}</pTotTribSN>
+          <pTotTrib>
+            <pTotTribFed>${fmtValor(0)}</pTotTribFed>
+            <pTotTribEst>${fmtValor(0)}</pTotTribEst>
+            <pTotTribMun>${pTotTribSN}</pTotTribMun>
+          </pTotTrib>
         </totTrib>
       </trib>
     </valores>
