@@ -166,11 +166,24 @@ function gerarXmlDPS(dados) {
   const cTribNac = firstProduct.x_nytro_codigo_tributacao || c.c_trib_nac_padrao;
   const cNBS = firstProduct.x_nytro_c_nbs || c.c_nbs_padrao;
 
+  // Descricao do servico (xDescServ) — obrigatória, NAO pode ser vazia
+  // Fallbacks: campo custom NFSe > nome das linhas > nome do produto > narracao > padrao
   let xDescServ = firstProduct.x_nytro_descricao_nfse || '';
   if (!xDescServ) {
     xDescServ = lines.map(l => l.name || '').filter(Boolean).join('; ');
   }
+  if (!xDescServ && firstProduct.name) {
+    xDescServ = String(firstProduct.name);
+  }
+  if (!xDescServ && move.narration) {
+    xDescServ = String(move.narration).substring(0, 2000);
+  }
+  if (!xDescServ) {
+    xDescServ = 'Servico prestado conforme contrato';
+  }
   if (xDescServ.length > 2000) xDescServ = xDescServ.substring(0, 2000);
+
+  console.log('[NFSE-XML] xDescServ=' + xDescServ.substring(0, 80) + (xDescServ.length > 80 ? '...' : ''));
 
   // --- Valores (TCInfoValores) ---
   // Ordem XSD: vServPrest, [vDescCondIncond], [vDedRed], trib
