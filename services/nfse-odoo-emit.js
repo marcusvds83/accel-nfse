@@ -16,6 +16,7 @@ const { assinarXml } = require('./nfse-signer');
 const { enviarDPS } = require('./nfse-client');
 const { carregarCertificado } = require('./firebase-cert');
 const { gerarPdfDanfse } = require('./nfse-pdf');
+const { cancelarNfse } = require('./nfse-cancelamento');
 
 // === XML-RPC Helpers ===
 
@@ -117,6 +118,10 @@ async function processPendingEmissions() {
   const db = config.odoo.db;
 
   try {
+    // 1. Processar cancelamentos solicitados
+    await processarCancelamentosSolicitados(client, db, uid);
+
+    // 2. Processar emissões pendentes
     const moveIds = await executeKw(client, db, uid, 'account.move', 'search', [[
       ['move_type', '=', 'out_invoice'],
       ['state', '=', 'posted'],
@@ -434,6 +439,86 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
   }
 
   return attachmentId;
+}
+
+// === Processar cancelamentos solicitados via botao Odoo ===
+async function processarCancelamentosSolicitados(client, db, uid) {
+  try {
+    const cancelIds = await executeKw(client, db, uid, 'account.move', 'search', [[
+      ['x_nytro_nfse_status', '=', 'cancelar_solicitado'],
+    ]]);
+
+    if (!cancelIds || !cancelIds.length) return;
+
+    console.log('[NFSE-CANCEL-POLL] ' + cancelIds.length + ' cancelamento(s) solicitado(s).');
+
+    for (const moveId of cancelIds) {
+      try {
+        console.log('=============================================================');
+        console.log('[NFSE-CANCEL-POLL] INICIO - move_id=' + moveId);
+
+        // Le dados da fatura
+        const moves = await readFields(client, db, uid, 'account.move', [moveId], [
+          'name', 'x_nytro_nfse_status', 'x_nytro_nfse_numero',
+          'x_nytro_nfse_codigo_verificacao', 'company_id',
+        ]);
+        if (!moves || !moves.length) {
+          console.log('[NFSE-CANCEL-POLL] Fatura nao encontrada');
+          continue;
+        }
+        const move = moves[0];
+        const chaveAcesso = move.x_nytro_nfse_codigo_verificacao || '';
+
+        console.log('[NFSE-CANCEL-POLL] Fatura: ' + move.name + ' | Chave: ' + chaveAcesso);
+
+        if (!chaveAcesso) {
+          console.log('[NFSE-CANCEL-POLL] Chave vazia, marcando como erro');
+          await safeUpdateError(client, db, uid, moveId, 'Chave de acesso vazia. Nao e possivel cancelar.');
+          continue;
+        }
+
+        // Busca CNPJ da empresa
+        const campoCnpj = await descobrirCampoCnpj(client, db, uid, 'res.company');
+        const companies = await readFields(client, db, uid, 'res.company', [move.company_id[0]], [campoCnpj || 'name', 'name']);
+        const cnpjPrest = campoCnpj ? String(companies[0][campoCnpj] || '').replace(/[^0-9]/g, '') : '';
+
+        // Cancela na SEFIN
+        console.log('[NFSE-CANCEL-POLL] Enviando cancelamento para SEFIN...');
+        const resultado = await cancelarNfse({
+          nNFSe: move.x_nytro_nfse_numero || '',
+          chaveAcesso: chaveAcesso,
+          cnpjPrest: cnpjPrest,
+          justificativa: 'Cancelamento solicitado pelo emitente via Odoo',
+        });
+
+        console.log('[NFSE-CANCEL-POLL] Resultado: sucesso=' + resultado.sucesso + ' | xMotivo=' + (resultado.xMotivo || ''));
+
+        if (resultado.sucesso) {
+          await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
+            x_nytro_nfse_status: 'cancelada',
+            x_nytro_nfse_erro: false,
+            x_nytro_nfse_mensagem: 'Cancelada: ' + (resultado.xMotivo || ''),
+          }]);
+          await executeKw(client, db, uid, 'mail.message', 'create', [{
+            model: 'account.move',
+            res_id: moveId,
+            body: '<b>NFS-e Cancelada com Sucesso</b><br/>Justificativa: Cancelamento solicitado pelo emitente via Odoo<br/>Resposta SEFIN: ' + (resultado.xMotivo || ''),
+            message_type: 'comment',
+          }]);
+          console.log('[NFSE-CANCEL-POLL] SUCESSO - Fatura ' + move.name + ' cancelada');
+        } else {
+          await safeUpdateError(client, db, uid, moveId, 'Falha ao cancelar: ' + (resultado.xMotivo || 'Erro desconhecido'));
+          console.log('[NFSE-CANCEL-POLL] FALHA - ' + (resultado.xMotivo || ''));
+        }
+        console.log('=============================================================');
+      } catch (e) {
+        console.error('[NFSE-CANCEL-POLL] Erro move_id=' + moveId + ':', e.stack || e.message);
+        await safeUpdateError(client, db, uid, moveId, 'Erro ao cancelar: ' + e.message);
+      }
+    }
+  } catch (e) {
+    console.error('[NFSE-CANCEL-POLL] Erro geral:', e.message);
+  }
 }
 
 module.exports = { processPendingEmissions };
