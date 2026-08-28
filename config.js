@@ -25,7 +25,8 @@ module.exports = {
     cidade: process.env.NFSE_CIDADE || 'Curitiba',
     codigo_ibge: process.env.NFSE_CODIGO_IBGE || '4106902',
     tp_amb: parseInt(process.env.NFSE_TP_AMB || '2', 10), // 1=producao, 2=homologacao
-    serie: process.env.NFSE_SERIE || '1',
+    // Serie: emissao propria (own-app) exige 1-49999. Ignora env var se fora da faixa.
+    serie: (() => { const s = process.env.NFSE_SERIE || '1'; const n = parseInt(s, 10); return (n >= 1 && n <= 49999) ? s : '1'; })(),
     versao: process.env.NFSE_VERSAO || '1.01',
     ver_aplic: process.env.NFSE_VER_APLIC || 'nfse-nytro_1.0.0',
     inscricao_municipal: process.env.NFSE_IM || '080212854094',
