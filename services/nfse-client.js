@@ -160,8 +160,8 @@ async function enviarDPS(dpsXmlAssinado, cert) {
       let nNFSe = null;
       let nDFSe = null;
       if (nfseXml) {
-        const nNFSeMatch = nfseXml.match(/<Numero>(\d+)<\/Numero>/);
-        const nDFSeMatch = nfseXml.match(/<CodigoVerificacao>([^<]+)<\/CodigoVerificacao>/);
+        const nNFSeMatch = nfseXml.match(/<nNFSe>(\d+)<\/nNFSe>/);
+        const nDFSeMatch = nfseXml.match(/<nDFSe>(\d+)<\/nDFSe>/);
         if (nNFSeMatch) nNFSe = nNFSeMatch[1];
         if (nDFSeMatch) nDFSe = nDFSeMatch[1];
       }

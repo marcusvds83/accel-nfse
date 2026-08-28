@@ -185,8 +185,10 @@ async function gerarPdfDanfse(nfseXml) {
     // --- Parseia dados do XML de retorno da SEFIN ---
     const Id = xmlAttr(nfseXml, 'infNFSe', 'Id') || '';
     const chaveAcesso = Id.replace('NFS', '');
-    const nNFSe = xmlTag(nfseXml, 'nNFSe') || '-';
-    const nDFSe = xmlTag(nfseXml, 'nDFSe') || '-';
+    // No DANFSe, mostra nDPS como numero principal (controlado pelo emitente)
+    // e nNFSe como referencia governamental
+    const numeroPrincipal = nDPS || nNFSe || '-';
+    const numeroGov = nNFSe !== '-' && nNFSe !== nDPS ? nNFSe : '';
     const dhProc = xmlTag(nfseXml, 'dhProc');
     const xLocEmi = xmlTag(nfseXml, 'xLocEmi') || '';
     const xLocPrestacao = xmlTag(nfseXml, 'xLocPrestacao') || '';
@@ -357,7 +359,7 @@ async function gerarPdfDanfse(nfseXml) {
     hline(doc, y, M, M + dataW, BORDER);
     vline(doc, M + halfW, y, y + 13, BORDER);
     doc.font('Helvetica').fontSize(7).fillColor(BLACK);
-    doc.text(nNFSe, M + PAD, y + 3, { width: halfW - PAD * 2, lineBreak: false });
+    doc.text(numeroPrincipal + (numeroGov ? ' (NFS-e Gov: ' + numeroGov + ')' : ''), M + PAD, y + 3, { width: halfW - PAD * 2, lineBreak: false });
     doc.text(fmtDataHora(dhProc), M + halfW + PAD, y + 3, { width: halfW - PAD * 2, lineBreak: false });
     y += 13;
 
