@@ -130,8 +130,8 @@ function gerarXmlDPS(dados) {
   const dCompet = fmtDataCompet(move.invoice_date);
 
   // ID do infDPS (formato XSD TSIdDPS: DPS + cMun 7d + tpInsc 1d + InscFed 14d + serie 5d + nDPS 15d = 45 chars)
-  // tpInsc: 1=CNPJ, 2=CPF
-  const tpInscPrest = cnpjPrest.length === 14 ? '1' : '2';
+  // tpInsc: 2=CNPJ, 1=CPF (conforme nfse-js referencia oficial SPED)
+  const tpInscPrest = cnpjPrest.length === 14 ? '2' : '1';
   const nDPSIdFmt = String(nDPS).padStart(15, '0');
   const serieFmt = String(serie).padStart(5, '0').slice(-5);
   const infDpsId = `DPS${ibge}${tpInscPrest}${cnpjPrest}${serieFmt}${nDPSIdFmt}`;
