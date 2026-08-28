@@ -15,6 +15,7 @@ const { gerarXmlDPS } = require('./nfse-xml');
 const { assinarXml } = require('./nfse-signer');
 const { enviarDPS } = require('./nfse-client');
 const { carregarCertificado } = require('./firebase-cert');
+const { gerarPdfDanfse } = require('./nfse-pdf');
 
 // === XML-RPC Helpers ===
 
@@ -320,6 +321,32 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     }]);
 
     console.log('[NFSE-EMIT] NFS-e ' + (resultado.nNFSe || proximoNumero) + ' autorizada para ' + move.name);
+
+    // 14. Anexa XML da NFS-e ao chatter
+    try {
+      if (resultado.xmlRetorno) {
+        const numNF = resultado.nNFSe || proximoNumero;
+        await uploadAnexo(client, db, uid, 'account.move', moveId,
+          'NFS-e-' + String(numNF).padStart(6, '0') + '.xml',
+          resultado.xmlRetorno, 'application/xml');
+      }
+    } catch (e) {
+      console.warn('[NFSE-EMIT] Falha ao anexar XML:', e.message);
+    }
+
+    // 15. Gera e anexa PDF DANFSE ao chatter
+    try {
+      if (resultado.xmlRetorno) {
+        const numNF = resultado.nNFSe || proximoNumero;
+        const pdfBuf = await gerarPdfDanfse(resultado.xmlRetorno);
+        await uploadAnexo(client, db, uid, 'account.move', moveId,
+          'DANFSE-' + String(numNF).padStart(6, '0') + '.pdf',
+          pdfBuf, 'application/pdf');
+      }
+    } catch (e) {
+      console.warn('[NFSE-EMIT] Falha ao anexar PDF DANFSE:', e.message);
+    }
+
     return { sucesso: true, nNFSe: resultado.nNFSe, chaveAcesso: resultado.chaveAcesso, nDFSe: resultado.nDFSe };
 
   } else {
@@ -347,6 +374,34 @@ async function safeUpdateError(client, db, uid, moveId, errMsg) {
   } catch (e) {
     console.error('[NFSE-EMIT] Falha ao registrar erro:', e.message);
   }
+}
+
+// === Upload de anexos ao chatter do Odoo ===
+/**
+ * Cria um ir.attachment no Odoo vinculado ao registro, aparecendo no chatter.
+ * @param {object} client - XML-RPC client
+ * @param {string} db - Odoo database
+ * @param {number} uid - User ID
+ * @param {string} model - res_model (ex: 'account.move')
+ * @param {number} resId - ID do registro
+ * @param {string} nome - Nome do arquivo (ex: 'NFS-e-19.xml')
+ * @param {string} conteudo - Conteudo do arquivo (string ou Buffer)
+ * @param {string} mimetype - MIME type
+ */
+async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimetype) {
+  const dados = Buffer.isBuffer(conteudo)
+    ? conteudo.toString('base64')
+    : Buffer.from(conteudo, 'utf-8').toString('base64');
+  const attachment = await executeKw(client, db, uid, 'ir.attachment', 'create', [{
+    name: nome,
+    datas: dados,
+    datas_fname: nome,
+    res_model: model,
+    res_id: resId,
+    mimetype: mimetype,
+  }]);
+  console.log('[NFSE-EMIT] Anexo criado: ' + nome + ' (id=' + attachment + ', ' + Math.round(dados.length * 0.75) + ' bytes)');
+  return attachment;
 }
 
 module.exports = { processPendingEmissions };
