@@ -276,12 +276,29 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
 
   // 13. Atualiza o Odoo com o resultado
   if (resultado.sucesso) {
+    // Formata data para o formato Odoo: YYYY-MM-DD HH:MM:SS (sem timezone/microssegundos)
+    let dataEmissao = '';
+    if (resultado.dataHoraProcessamento) {
+      try {
+        const dt = new Date(resultado.dataHoraProcessamento);
+        dataEmissao = dt.getFullYear() + '-' +
+          String(dt.getMonth() + 1).padStart(2, '0') + '-' +
+          String(dt.getDate()).padStart(2, '0') + ' ' +
+          String(dt.getHours()).padStart(2, '0') + ':' +
+          String(dt.getMinutes()).padStart(2, '0') + ':' +
+          String(dt.getSeconds()).padStart(2, '0');
+      } catch (_) {
+        dataEmissao = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      }
+    } else {
+      dataEmissao = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    }
     const updateData = {
       x_nytro_nfse_status: 'autorizada',
       x_nytro_nfse_numero: resultado.nNFSe || String(proximoNumero),
       x_nytro_nfse_codigo_verificacao: resultado.chaveAcesso || resultado.nDFSe || '',
       x_nytro_nfse_protocolo: resultado.idDps || '',
-      x_nytro_nfse_data_emissao: resultado.dataHoraProcessamento || new Date().toISOString(),
+      x_nytro_nfse_data_emissao: dataEmissao,
       x_nytro_nfse_erro: false,
       x_nytro_nfse_mensagem: false,
     };
