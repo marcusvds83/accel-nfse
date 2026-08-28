@@ -30,6 +30,31 @@ const config = require('../config');
 
 const NS = 'http://www.sped.fazenda.gov.br/nfse';
 
+// === Cache IBGE por CEP (ViaCEP) ===
+const ibgeCache = {};
+
+/** Busca codigo IBGE do municipio pelo CEP via ViaCEP (com cache) */
+async function ibgeFromCep(cep) {
+  const cepLimpo = limpaDoc(cep);
+  if (!cepLimpo || cepLimpo.length !== 8) return null;
+  if (ibgeCache[cepLimpo]) return ibgeCache[cepLimpo];
+  try {
+    const resp = await fetch('https://viacep.com.br/ws/' + cepLimpo + '/json/', {
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    });
+    const data = await resp.json();
+    if (data && data.ibge) {
+      ibgeCache[cepLimpo] = data.ibge;
+      console.log('[NFSE-XML] ViaCEP: CEP=' + cepLimpo + ' -> IBGE=' + data.ibge + ' (' + (data.localidade || '') + '/' + (data.uf || '') + ')');
+      return data.ibge;
+    }
+  } catch (e) {
+    console.warn('[NFSE-XML] ViaCEP falhou para CEP ' + cepLimpo + ': ' + e.message);
+  }
+  return null;
+}
+
 // === Helpers de formatacao ===
 
 /** Remove pontuacao de CNPJ/CPF */
@@ -70,10 +95,10 @@ function fmtDataCompet(d) {
   return `${yyyy}-${MM}-${dd}`;
 }
 
-/** Extrai codigo IBGE do city_id do Odoo */
+/** Extrai codigo IBGE do city_id do Odoo (fallback: busca ViaCEP pelo CEP) */
 function ibgeFromCity(cityId) {
-  if (!cityId) return config.nfse.codigo_ibge;
-  return config.nfse.codigo_ibge;
+  // Sem l10n_br_city_id no Odoo Online, sempre usa fallback
+  return null; // null sinaliza para usar ViaCEP
 }
 
 /** Extrai numero do endereco */
@@ -119,7 +144,7 @@ function xmlEndereco(cMun, cep, xLgr, nro, xBairro, xCpl) {
 /**
  * Gera o XML DPS conforme XSD v1.01 do SPED NFS-e Nacional.
  */
-function gerarXmlDPS(dados) {
+async function gerarXmlDPS(dados) {
   const { move, company, partner, lines, products, nDPS } = dados;
   const c = config.nfse;
 
@@ -163,7 +188,13 @@ function gerarXmlDPS(dados) {
   const logrTomador = limpaLogradouro(partner.street);
   const bairroTomador = partner.district || partner.street2 || '';
   const cepTomador = limpaDoc(partner.zip || '');
-  const ibgeTomador = ibgeFromCity(partner.city_id || partner._cidade);
+  let ibgeTomador = ibgeFromCity(partner.city_id || partner._cidade);
+  // Se nao achou pelo Odoo, busca pelo CEP via ViaCEP
+  if (!ibgeTomador && cepTomador) {
+    ibgeTomador = await ibgeFromCep(cepTomador);
+  }
+  // Fallback final: codigo do prestador (so funciona se tomador for do mesmo municipio)
+  if (!ibgeTomador) ibgeTomador = ibge;
 
   // --- Servico (TCServ) ---
   const firstProduct = lines[0] && lines[0].product_id ? (products[lines[0].product_id[0]] || {}) : {};

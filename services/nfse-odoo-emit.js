@@ -258,7 +258,7 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
   console.log('[NFSE-EMIT] Fatura ' + move.name + ' (move_id=' + moveId + ') nDPS=' + proximoNumero);
 
   // 10. Gera XML DPS
-  const { xml: dpsXml, infDpsId } = gerarXmlDPS({
+  const { xml: dpsXml, infDpsId } = await gerarXmlDPS({
     move, company, partner,
     lines: serviceLines,
     products: productMap,
