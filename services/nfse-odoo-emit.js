@@ -261,24 +261,36 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     x_nytro_nfse_numero: proximoNumero,
   }]);
 
-  console.log('[NFSE-EMIT] Fatura ' + move.name + ' (move_id=' + moveId + ') nDPS=' + proximoNumero);
+  console.log('=============================================================');
+  console.log('[NFSE-EMIT] INICIO EMISSAO - Fatura ' + move.name + ' (move_id=' + moveId + ')');
+  console.log('[NFSE-EMIT]   nDPS: ' + proximoNumero + ' (ultimo=' + ultimoNumero + ')');
+  console.log('[NFSE-EMIT]   Empresa: ' + company.name + ' CNPJ=' + company._cnpj);
+  console.log('[NFSE-EMIT]   Tomador: ' + partner.name + ' CNPJ=' + partner._cnpj);
+  console.log('[NFSE-EMIT]   Valor: R$ ' + (move.amount_total || move.amount_untaxed));
+  console.log('[NFSE-EMIT]   Ambiente: ' + (config.nfse.tp_amb === 1 ? 'PRODUCAO' : 'HOMOLOGACAO'));
 
   // 10. Gera XML DPS
+  console.log('[NFSE-EMIT] Etapa 1/4: Gerando XML DPS...');
   const { xml: dpsXml, infDpsId } = await gerarXmlDPS({
     move, company, partner,
     lines: serviceLines,
     products: productMap,
     nDPS: proximoNumero,
   });
+  console.log('[NFSE-EMIT] XML DPS gerado: ' + dpsXml.length + ' bytes | infDpsId=' + infDpsId);
 
   // 11. Assina o XML
+  console.log('[NFSE-EMIT] Etapa 2/4: Assinando XML DPS...');
   const dpsAssinado = await assinarXml(dpsXml, {
     privateKeyPem: cert.privateKeyPem,
     certPem: cert.certPem,
   });
+  console.log('[NFSE-EMIT] XML assinado: ' + dpsAssinado.length + ' bytes');
 
   // 12. Envia para o SPED
+  console.log('[NFSE-EMIT] Etapa 3/4: Enviando DPS para SEFIN...');
   const resultado = await enviarDPS(dpsAssinado, cert);
+  console.log('[NFSE-EMIT] Etapa 4/4: Resultado SEFIN: sucesso=' + resultado.sucesso + ' | cStat=' + (resultado.cStat || 'n/a'));
 
   // 13. Atualiza o Odoo com o resultado
   if (resultado.sucesso) {

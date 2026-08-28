@@ -127,7 +127,17 @@ async function enviarDPS(dpsXmlAssinado, cert) {
       };
     }
 
-    console.log('[NFSE-CLIENT] Resposta HTTP ' + response.status + ' tipoAmbiente=' + respJson.tipoAmbiente);
+    console.log('=============================================================');
+    console.log('[NFSE-CLIENT] RESPOSTA SEFIN COMPLETA (HTTP ' + response.status + '):');
+    console.log(JSON.stringify(respJson, null, 2));
+    console.log('=============================================================');
+    console.log('[NFSE-CLIENT] tipoAmbiente=' + respJson.tipoAmbiente);
+    console.log('[NFSE-CLIENT] dataHoraProcessamento=' + (respJson.dataHoraProcessamento || 'n/a'));
+    console.log('[NFSE-CLIENT] chaveAcesso=' + (respJson.chaveAcesso || 'n/a'));
+    console.log('[NFSE-CLIENT] idDps=' + (respJson.idDps || 'n/a'));
+    console.log('[NFSE-CLIENT] nfseXmlGZipB64 presente=' + !!(respJson.nfseXmlGZipB64) + ' (' + (respJson.nfseXmlGZipB64 ? respJson.nfseXmlGZipB64.length + ' chars' : 'n/a') + ')');
+    console.log('[NFSE-CLIENT] erros=' + JSON.stringify(respJson.erros || []));
+    console.log('[NFSE-CLIENT] alertas=' + JSON.stringify(respJson.alertas || []));
 
     // 5. Verifica se ha erros na resposta
     if (respJson.erros && respJson.erros.length > 0) {
@@ -166,7 +176,15 @@ async function enviarDPS(dpsXmlAssinado, cert) {
         if (nDFSeMatch) nDFSe = nDFSeMatch[1];
       }
 
-      console.log('[NFSE-CLIENT] NFS-e autorizada! Chave=' + respJson.chaveAcesso + ' Numero=' + nNFSe);
+      console.log('[NFSE-CLIENT] =============================================');
+      console.log('[NFSE-CLIENT] NFS-e AUTORIZADA COM SUCESSO!');
+      console.log('[NFSE-CLIENT]   Chave de Acesso: ' + respJson.chaveAcesso);
+      console.log('[NFSE-CLIENT]   nNFSe (SEFIN): ' + (nNFSe || 'n/a'));
+      console.log('[NFSE-CLIENT]   nDFSe (SEFIN): ' + (nDFSe || 'n/a'));
+      console.log('[NFSE-CLIENT]   IdDPS: ' + (respJson.idDps || 'n/a'));
+      console.log('[NFSE-CLIENT]   dhProc: ' + (respJson.dataHoraProcessamento || 'n/a'));
+      console.log('[NFSE-CLIENT]   verAplic SEFIN: ' + (respJson.versaoAplicativo || 'n/a'));
+      console.log('[NFSE-CLIENT] =============================================');
 
       // Alertas informativos (nao sao erros)
       if (respJson.alertas && respJson.alertas.length > 0) {
