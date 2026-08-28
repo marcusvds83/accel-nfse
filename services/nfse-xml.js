@@ -129,8 +129,9 @@ function gerarXmlDPS(dados) {
   const dhEmi = fmtDataHora(move.invoice_date);
   const dCompet = fmtDataCompet(move.invoice_date);
 
-  // ID do infDPS (formato do SPED)
-  const infDpsId = `DPS${ibge}22${cnpjPrest}${String(serie).padStart(5, '0')}${String(nDPS).padStart(14, '0')}`;
+  // ID do infDPS (formato SPED Nacional: DPS + cMun 7d + CNPJ 14d + nDPS 15d = 39 chars)
+  const nDPSFmt = String(nDPS).padStart(15, '0');
+  const infDpsId = `DPS${ibge}${cnpjPrest}${nDPSFmt}`;
 
   // --- Prestador (TCInfoPrestador) ---
   // Ordem XSD: CNPJ, [CAEPF], [IM], [xNome], [end], [fone], [email], regTrib
@@ -206,7 +207,7 @@ function gerarXmlDPS(dados) {
     <dhEmi>${dhEmi}</dhEmi>
     <verAplic>${escXml(c.ver_aplic)}</verAplic>
     <serie>${escXml(serie)}</serie>
-    <nDPS>${nDPS}</nDPS>
+    <nDPS>${nDPSFmt}</nDPS>
     <dCompet>${dCompet}</dCompet>
     <tpEmit>1</tpEmit>
     <cLocEmi>${ibge}</cLocEmi>
