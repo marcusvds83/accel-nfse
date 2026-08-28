@@ -411,7 +411,6 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
   const attachValues = {
     name: nome,
     datas: dados,
-    datas_fname: nome,
     res_model: model,
     res_id: resId,
     mimetype: mimetype,

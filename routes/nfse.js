@@ -273,7 +273,7 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       const xmlB64 = Buffer.from(nfseXml, 'utf-8').toString('base64');
       const attachId = await new Promise((resolve, reject) => {
         client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
-          name: xmlNome, datas: xmlB64, datas_fname: xmlNome,
+          name: xmlNome, datas: xmlB64,
           res_model: 'account.move', res_id: move_id, mimetype: 'application/xml',
         }]], (err, id) => err ? reject(err) : resolve(id));
       });
@@ -300,7 +300,7 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       const pdfB64 = pdfBuf.toString('base64');
       const attachId = await new Promise((resolve, reject) => {
         client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
-          name: pdfNome, datas: pdfB64, datas_fname: pdfNome,
+          name: pdfNome, datas: pdfB64,
           res_model: 'account.move', res_id: move_id, mimetype: 'application/pdf',
         }]], (err, id) => err ? reject(err) : resolve(id));
       });
