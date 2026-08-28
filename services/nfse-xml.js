@@ -216,7 +216,6 @@ function gerarXmlDPS(dados) {
     <cLocEmi>${ibge}</cLocEmi>
     <prest>
       <CNPJ>${cnpjPrest}</CNPJ>
-      <IM>${config.nfse.inscricao_municipal}</IM>
       <xNome>${escXml(company.name)}</xNome>${endPrestXml}${fonePrestXml}${emailPrestXml}
       <regTrib>
         <opSimpNac>${c.op_simp_nac}</opSimpNac>
