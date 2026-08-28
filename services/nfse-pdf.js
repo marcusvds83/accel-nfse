@@ -1,10 +1,12 @@
 /**
- * services/nfse-pdf.js — Gerador de PDF DANFSE (modelo SEFIN/DANFSe v2.0)
+ * services/nfse-pdf.js — Gerador de PDF DANFSe (modelo DANFSe v2.0)
  * ====================================================================
- * Replica fielmente o layout oficial do DANFSE Nacional, com:
- *   - Logo da empresa no cabecalho
- *   - QR Code da chave de acesso
- *   - Grid 4 colunas com linhas 0.5pt
+ * Replica o layout oficial do DANFSe Nacional v2.0, com:
+ *   - Badge verde "NFSe" no canto superior esquerdo
+ *   - Titulo "DANFSe v2.0" centralizado e sublinhado
+ *   - Logo da empresa (Nytro) ao lado do badge
+ *   - QR Code da chave de acesso (lado direito)
+ *   - Grid com bordas finas cinzas
  *   - Secoes: Identificacao, Prestador, Tomador, Servico, Tributacao, Valores
  *   - Rodape com tributos aproximados (Lei 12.741/2012)
  */
@@ -14,20 +16,19 @@ const bwipjs = require('bwip-js');
 const path = require('path');
 const fs = require('fs');
 
-// === Carrega logo como Buffer (com fallback para texto) ===
+// === Carrega logo como Buffer ===
 let LOGO_BUF = null;
 try {
   const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
   if (fs.existsSync(logoPath)) LOGO_BUF = fs.readFileSync(logoPath);
 } catch (_) {}
 
-// === Tenta baixar a logo do Odoo ao iniciar (fallback async) ===
 async function ensureLogo() {
   if (LOGO_BUF) return LOGO_BUF;
   try {
     const logoUrl = process.env.ODOO_LOGO_URL || '';
     if (logoUrl) {
-      const resp = await fetch(logoUrl, { signal: AbortSignal.timeout(5000) });
+      const resp = await fetch(logoUrl, { signal: AbortSignal.timeout(8000) });
       if (resp.ok) {
         const arrayBuf = await resp.arrayBuffer();
         LOGO_BUF = Buffer.from(arrayBuf);
@@ -39,31 +40,26 @@ async function ensureLogo() {
 }
 
 // === Helpers de formatacao ===
-
 function fmtCnpj(cnpj) {
   const d = (cnpj || '').replace(/[^0-9]/g, '');
   if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
   return cnpj || '';
 }
-
 function fmtCep(cep) {
   const d = (cep || '').replace(/[^0-9]/g, '');
   if (d.length === 8) return d.replace(/^(\d{5})(\d{3})$/, '$1-$2');
   return cep || '';
 }
-
 function fmtMoeda(v) {
   return 'R$ ' + Number(v || 0).toFixed(2).replace('.', ',');
 }
-
 function fmtFone(f) {
   const d = (f || '').replace(/[^0-9]/g, '');
   if (d.length === 11) return '(' + d.substring(0, 2) + ') ' + d.substring(2, 7) + '-' + d.substring(7);
   if (d.length === 10) return '(' + d.substring(0, 2) + ') ' + d.substring(2, 6) + '-' + d.substring(6);
   return f || '';
 }
-
 function fmtDataHora(iso) {
   if (!iso) return '';
   try {
@@ -77,140 +73,116 @@ function fmtDataHora(iso) {
     return dd + '/' + mm + '/' + yy + ' ' + hh + ':' + mi + ':' + ss;
   } catch (_) { return iso; }
 }
-
 function fmtData(iso) {
   if (!iso) return '';
   try {
     const dt = new Date(iso);
-    const dd = String(dt.getDate()).padStart(2, '0');
-    const mm = String(dt.getMonth() + 1).padStart(2, '0');
-    const yy = dt.getFullYear();
-    return dd + '/' + mm + '/' + yy;
+    return String(dt.getDate()).padStart(2, '0') + '/' + String(dt.getMonth() + 1).padStart(2, '0') + '/' + dt.getFullYear();
   } catch (_) { return iso; }
 }
-
 function fmtCNAE(c) {
   const d = (c || '').replace(/[^0-9]/g, '');
   if (d.length === 6) return d.substring(0, 2) + '.' + d.substring(2, 4) + '.' + d.substring(4);
   return c || '';
 }
-
 function fmtNBS(c) {
   const d = (c || '').replace(/[^0-9]/g, '');
   if (d.length === 9) return d.substring(0, 1) + '.' + d.substring(1, 5) + '.' + d.substring(5, 7) + '.' + d.substring(7);
   return c || '';
 }
-
 function fmtIBGE(ibge) {
   const d = (ibge || '').replace(/[^0-9]/g, '');
   if (d.length === 7) return d.substring(0, 2) + '.' + d.substring(2);
   return ibge || '';
 }
 
-/** Extrai texto de tag XML */
 function xmlTag(xml, tag) {
   const re = new RegExp('<(?:\\w+:)?' + tag + '[^>]*>([\\s\\S]*?)<\/(?:\\w+:)?' + tag + '>', 'i');
   const m = xml.match(re);
   return m ? m[1].trim() : '';
 }
-
-/** Extrai valor de atributo */
 function xmlAttr(xml, tag, attr) {
   const re = new RegExp('<(?:\\w+:)?' + tag + '\\s[^>]*' + attr + '="([^"]*)"', 'i');
   const m = xml.match(re);
   return m ? m[1].trim() : '';
 }
-
-/** Gera QR Code como PNG buffer */
 function generateQR(text) {
   return new Promise((resolve, reject) => {
     try {
       const buf = bwipjs.toBuffer({
-        bcid: 'qrcode',
-        text: text || ' ',
-        scale: 3,
-        height: 10,
-        includetext: false,
+        bcid: 'qrcode', text: text || ' ', scale: 3, height: 10, includetext: false,
       });
       resolve(buf);
     } catch (e) { reject(e); }
   });
 }
 
-// === Layout constants (A4, grid 4 colunas) ===
-const PAGE_W = 595.28;
-const PAGE_H = 841.89;
-const MARGIN = 5;
-const COLS = [9, 153, 298, 442, 587]; // x positions das 4 colunas
-const COL_W = [144, 145, 144, 145]; // largura de cada coluna
-const GRAY_BG = '#F2F2F2';
-const LINE_COLOR = '#000000';
-const LINE_W = 0.5;
-const PAD = 4; // padding interno das celulas
+// === Layout constants (A4) ===
+const PW = 595.28;
+const PH = 841.89;
+const M = 10; // margem
+const LW = 0.5;
+const GRAY_BG = '#F0F0F0';
+const BORDER = '#999999';
+const BLACK = '#000000';
+const GREEN_DARK = '#006633';
+const WHITE = '#FFFFFF';
+const PAD = 4;
 
 // === Drawing helpers ===
-
-function hline(doc, y, x0, x1) {
-  doc.moveTo(x0, y).lineTo(x1, y).lineWidth(LINE_W).strokeColor(LINE_COLOR).stroke();
+function hline(doc, y, x0, x1, color, w) {
+  doc.moveTo(x0, y).lineTo(x1, y).lineWidth(w || LW).strokeColor(color || BORDER).stroke();
 }
-
-function vline(doc, x, y0, y1) {
-  doc.moveTo(x, y0).lineTo(x, y1).lineWidth(LINE_W).strokeColor(LINE_COLOR).stroke();
+function vline(doc, x, y0, y1, color, w) {
+  doc.moveTo(x, y0).lineTo(x, y1).lineWidth(w || LW).strokeColor(color || BORDER).stroke();
 }
-
-/** Preenche fundo de uma celula */
-function fillCell(doc, x, y, w, h, color) {
-  if (color) doc.rect(x, y, w, h).fill(color);
+function fillRect(doc, x, y, w, h, color) {
+  doc.save().rect(x, y, w, h).fill(color || GRAY_BG).restore();
 }
-
-/** Rotulo bold 6pt */
-function label(doc, x, y, text, w) {
-  doc.font('Helvetica-Bold').fontSize(6).fillColor('#000000');
-  doc.text(text, x + PAD, y + 3, { width: w - PAD * 2, lineBreak: false });
+function txt(doc, x, y, text, opts) {
+  const o = { ...opts };
+  doc.text(text, x, y, o);
 }
-
-/** Valor normal 7pt */
-function value(doc, x, y, text, w, opts) {
-  doc.font('Helvetica').fontSize(7).fillColor('#000000');
-  doc.text(text, x + PAD, y + 3, { width: w - PAD * 2, lineBreak: !!(opts && opts.multiline), ...opts });
-}
-
-/** Secao header (fundo cinza, texto bold 7pt) */
-function sectionHeader(doc, y, text, colStart, colEnd) {
-  const x0 = COLS[colStart || 0];
-  const x1 = COLS[colEnd || 4];
-  fillCell(doc, x0, y, x1 - x0, 19, GRAY_BG);
-  doc.font('Helvetica-Bold').fontSize(7).fillColor('#000000');
-  doc.text(text, x0 + PAD, y + 6, { width: x1 - x0 - PAD * 2, lineBreak: false });
-}
-
-/** Desenha grid horizontal completo */
-function gridH(doc, y, numCols) {
-  for (let i = 0; i <= numCols; i++) {
-    vline(doc, COLS[i], y, y + 19);
+function labelRow(doc, y, labels, widths, startX) {
+  // Desenha labels em negrito numa linha
+  doc.font('Helvetica-Bold').fontSize(6).fillColor(BLACK);
+  let x = startX || M;
+  for (let i = 0; i < labels.length; i++) {
+    doc.text(labels[i], x + PAD, y + 2, { width: widths[i] - PAD * 2, lineBreak: false });
+    x += widths[i];
   }
 }
-
-/** Desenha grid horizontal completo com altura custom */
-function gridHFull(doc, y, h) {
-  hline(doc, y, COLS[0], COLS[4]);
-  hline(doc, y + h, COLS[0], COLS[4]);
-  for (let i = 1; i < 4; i++) {
-    vline(doc, COLS[i], y, y + h);
+function valueRow(doc, y, values, widths, startX, opts) {
+  doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+  let x = startX || M;
+  for (let i = 0; i < values.length; i++) {
+    const o = { width: widths[i] - PAD * 2, lineBreak: false };
+    if (opts && opts.aligns) o.align = opts.aligns[i];
+    doc.text(values[i] || '-', x + PAD, y + 2, o);
+    x += widths[i];
   }
+}
+function sectionHeader(doc, y, text, totalW, startX) {
+  const sx = startX || M;
+  fillRect(doc, sx, y, totalW, 16, GRAY_BG);
+  hline(doc, y, sx, sx + totalW, BORDER, 0.7);
+  doc.font('Helvetica-Bold').fontSize(7).fillColor(BLACK);
+  doc.text(text, sx + PAD, y + 5, { width: totalW - PAD * 2, lineBreak: false });
+  return y + 16;
 }
 
 // === Gerador principal ===
-
 async function gerarPdfDanfse(nfseXml) {
   return new Promise(async (resolve, reject) => {
-    const doc = new PDFDocument({ size: [PAGE_W, PAGE_H], margin: 0, bufferPages: true });
+    const doc = new PDFDocument({ size: [PW, PH], margin: 0, bufferPages: true });
     const bufs = [];
     doc.on('data', b => bufs.push(b));
     doc.on('end', () => resolve(Buffer.concat(bufs)));
     doc.on('error', reject);
 
-    // --- Parseia dados do XML ---
+    const CW = PW - M * 2; // conteudo width
+
+    // --- Parseia dados do XML de retorno da SEFIN ---
     const Id = xmlAttr(nfseXml, 'infNFSe', 'Id') || '';
     const chaveAcesso = Id.replace('NFS', '');
     const nNFSe = xmlTag(nfseXml, 'nNFSe') || '-';
@@ -219,12 +191,11 @@ async function gerarPdfDanfse(nfseXml) {
     const xLocEmi = xmlTag(nfseXml, 'xLocEmi') || '';
     const xLocPrestacao = xmlTag(nfseXml, 'xLocPrestacao') || '';
     const xTribNac = xmlTag(nfseXml, 'xTribNac') || '';
-    const xNBSLabel = xmlTag(nfseXml, 'xNBS') || '';
     const verAplic = xmlTag(nfseXml, 'verAplic') || '';
     const ambGer = xmlTag(nfseXml, 'ambGer') || '2';
     const vLiq = xmlTag(nfseXml, 'vLiq') || '0';
 
-    // Emitente (preenchido pela SEFIN no XML externo)
+    // Emitente
     const emitMatch = nfseXml.match(/<emit>[\s\S]*?<\/emit>/i);
     const emitXml = emitMatch ? emitMatch[0] : '';
     const emitCnpj = xmlTag(emitXml, 'CNPJ');
@@ -236,21 +207,19 @@ async function gerarPdfDanfse(nfseXml) {
     const emitUF = xmlTag(emitXml, 'UF');
     const emitEmail = xmlTag(emitXml, 'email');
     const emitFone = xmlTag(emitXml, 'fone') || '';
+    const emitIM = xmlTag(emitXml, 'IM') || '';
 
-    // cMun emitente
     const enderNacMatch = emitXml.match(/<enderNac>[\s\S]*?<\/enderNac>/i);
     const enderNacXml = enderNacMatch ? enderNacMatch[0] : '';
     const emitCMun = xmlTag(enderNacXml, 'cMun');
 
-    // DPS info
+    // DPS
     const dpsMatch = nfseXml.match(/<DPS[^>]*>[\s\S]*?<\/DPS>/i);
     const dpsXml = dpsMatch ? dpsMatch[0] : '';
     const dhEmi = xmlTag(dpsXml, 'dhEmi');
     const dCompet = xmlTag(dpsXml, 'dCompet');
     const serie = xmlTag(dpsXml, 'serie');
     const nDPS = xmlTag(dpsXml, 'nDPS');
-
-    // Regime tributario
     const opSimpNac = xmlTag(dpsXml, 'opSimpNac');
     const regApTribSN = xmlTag(dpsXml, 'regApTribSN');
 
@@ -275,410 +244,465 @@ async function gerarPdfDanfse(nfseXml) {
 
     // Valores
     const vServ = xmlTag(dpsXml, 'vServ') || '0';
+    const vDed = xmlTag(dpsXml, 'vDed') || '0';
+    const vDescIncond = xmlTag(dpsXml, 'vDescIncond') || '0';
+    const vDescCond = xmlTag(dpsXml, 'vDescCond') || '0';
+    const vPIS = xmlTag(dpsXml, 'vPIS') || '0';
+    const vCOFINS = xmlTag(dpsXml, 'vCOFINS') || '0';
+    const vINSS = xmlTag(dpsXml, 'vINSS') || '0';
+    const vIR = xmlTag(dpsXml, 'vIR') || '0';
+    const vCSLL = xmlTag(dpsXml, 'vCSLL') || '0';
     const tribISSQN = xmlTag(dpsXml, 'tribISSQN');
     const tpRetISSQN = xmlTag(dpsXml, 'tpRetISSQN');
+    const vBCISSQN = xmlTag(dpsXml, 'vBCISSQN') || vServ;
+    const pAliqISSQN = xmlTag(dpsXml, 'pAliq');
+    const vISSQN = xmlTag(dpsXml, 'vISSQN') || '0';
     const pTotTribSN = xmlTag(dpsXml, 'pTotTribSN') || '0';
 
-    // === Bordas da pagina ===
-    doc.rect(MARGIN, MARGIN, PAGE_W - MARGIN * 2, PAGE_H - MARGIN * 2)
-      .lineWidth(1).strokeColor('#000000').stroke();
+    // === Borda da pagina ===
+    doc.rect(M, M, CW, PH - M * 2).lineWidth(1).strokeColor(BLACK).stroke();
 
-    // ===== CABECALHO (y=6 a y=40) =====
-    const y0 = 6;
-    // Fundo cinza do cabecalho
-    fillCell(doc, COLS[0], y0, COLS[4] - COLS[0], 34, GRAY_BG);
-    hline(doc, y0 + 34, COLS[0], COLS[4]);
-    vline(doc, COLS[1], y0, y0 + 34);
-    vline(doc, COLS[2], y0, y0 + 34);
-    vline(doc, COLS[3], y0, y0 + 34);
+    // ==============================================
+    // CABECALHO (y=10 a y=48)
+    // ==============================================
+    let y = M;
+    const headerH = 42;
 
-    // Logo (coluna 0)
+    // Badge verde "NFSe" (canto esquerdo)
+    fillRect(doc, M + 2, y + 2, 52, 22, GREEN_DARK);
+    doc.font('Helvetica-Bold').fontSize(14).fillColor(WHITE);
+    doc.text('NFSe', M + 6, y + 6, { width: 44, align: 'center' });
+
+    // "Nota Fiscal de Servicos Eletronica" ao lado do badge
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(BLACK);
+    doc.text('Nota Fiscal de Servi\u00e7os Eletr\u00f4nica', M + 58, y + 5, { width: 200, lineBreak: false });
+
+    // Logo da empresa (Nytro) — canto esquerdo, abaixo do badge
     const logoBuf = await ensureLogo();
     if (logoBuf) {
-      try { doc.image(logoBuf, COLS[0] + PAD, y0 + 5, { height: 22 }); } catch (_) {
-        doc.font('Helvetica-Bold').fontSize(10).fillColor('#000000');
-        doc.text('NYTRO', COLS[0] + PAD, y0 + 10);
+      try {
+        doc.image(logoBuf, M + 2, y + 27, { height: 14 });
+      } catch (_) {
+        doc.font('Helvetica-Bold').fontSize(9).fillColor(GREEN_DARK);
+        doc.text('NYTRO', M + 4, y + 28);
       }
     } else {
-      doc.font('Helvetica-Bold').fontSize(10).fillColor('#000000');
-      doc.text('NYTRO', COLS[0] + PAD, y0 + 10);
+      doc.font('Helvetica-Bold').fontSize(9).fillColor(GREEN_DARK);
+      doc.text('NYTRO', M + 4, y + 28);
     }
 
-    // Titulo DANFSe (colunas 1-2)
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#000000');
-    doc.text('DANFSe v2.0', COLS[1] + PAD, y0 + 6, { width: COLS[2] - COLS[1] - PAD * 2, align: 'center' });
-    doc.font('Helvetica-Bold').fontSize(9);
-    doc.text('Documento Auxiliar da NFS-e', COLS[1] + PAD, y0 + 16, { width: COLS[2] - COLS[1] - PAD * 2, align: 'center' });
+    // Titulo central: DANFSe v2.0 (sublinhado)
+    doc.font('Helvetica-Bold').fontSize(12).fillColor(BLACK);
+    const titleX = M + CW / 2 - 80;
+    doc.text('DANFSe v2.0', titleX, y + 4, { width: 160, align: 'center' });
+    // Sublinhado
+    const titleW = doc.widthOfString('DANFSe v2.0');
+    const titleMid = titleX + 80;
+    hline(doc, y + 17, titleMid - titleW / 2 - 2, titleMid + titleW / 2 + 2, BLACK, 1);
+    // Subtitulo
+    doc.font('Helvetica-Bold').fontSize(7).fillColor(BLACK);
+    doc.text('Documento Auxiliar da NFS-e', titleX, y + 20, { width: 160, align: 'center' });
 
-    // Info do municipio (coluna 3)
-    doc.font('Helvetica').fontSize(8).fillColor('#000000');
-    doc.text('Município: ' + xLocEmi + ' - ' + emitUF, COLS[3] + PAD, y0 + 6, { width: COL_W[3] - PAD * 2 });
+    // Info do municipio (canto superior direito)
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    const rightInfoX = M + CW - 145;
+    doc.text('Munic\u00edpio: ' + xLocEmi + ' - ' + (emitUF || ''), rightInfoX, y + 4, { width: 140, align: 'right' });
     doc.font('Helvetica').fontSize(6);
-    doc.text('Ambiente Gerador: ' + ambGer, COLS[3] + PAD, y0 + 16, { width: COL_W[3] - PAD * 2 });
-    doc.text('Tipo de Ambiente: ' + ambGer, COLS[3] + PAD, y0 + 24, { width: COL_W[3] - PAD * 2 });
+    const ambLabel = ambGer === '1' ? 'Producao' : 'Homologacao';
+    doc.text('Ambiente: ' + ambLabel, rightInfoX, y + 13, { width: 140, align: 'right' });
+    doc.text('Versao: ' + (verAplic || '1.01'), rightInfoX, y + 20, { width: 140, align: 'right' });
 
-    let y = 44;
+    // Linha divisoria abaixo do cabecalho
+    y = M + headerH;
+    hline(doc, y, M, M + CW, BLACK, 1);
+    y += 2;
 
-    // ===== DADOS CIENTIFICACAO / IDENTIFICACAO =====
-    // Data Cientificacao (topo direito)
-    doc.font('Helvetica-Bold').fontSize(6).fillColor('#000000');
-    doc.text('DATA CIENTIFICAÇÃO:', COLS[1], y - 4, { width: COL_W[1] });
-    doc.text('IDENTIFICAÇÃO E ASSINATURA', COLS[2], y - 4, { width: COL_W[2] });
-    doc.text('N° NFS-e / CHAVE NFS-e', COLS[3], y - 4, { width: COL_W[3] });
-    doc.font('Helvetica').fontSize(7);
-    doc.text(nNFSe + ' / ' + chaveAcesso, COLS[3] + PAD, y + 3, { width: COL_W[3] - PAD * 2 });
-
-    // Chave de Acesso (full width)
-    fillCell(doc, COLS[0], y, COLS[4] - COLS[0], 19, GRAY_BG);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'CHAVE DE ACESSO DA NFS-e', COL_W[0]);
-    value(doc, COLS[0], y, chaveAcesso, COL_W[0]);
-
-    // QR Code area (coluna 3, y+19)
+    // ==============================================
+    // QR CODE (canto direito, ao lado da chave de acesso)
+    // ==============================================
+    const qrX = M + CW - 100;
+    const qrY = y + 2;
     try {
       const qrBuf = await generateQR(chaveAcesso);
-      doc.image(qrBuf, COLS[3] + 5, y + 23, { width: 45, height: 45 });
+      doc.image(qrBuf, qrX, qrY, { width: 50, height: 50 });
     } catch (_) {}
-
     // Texto do QR
-    doc.font('Helvetica').fontSize(6).fillColor('#000000');
-    doc.text('A autenticidade desta NFS-e pode ser verificada', COLS[3] + PAD, y + 72, { width: COL_W[3] - PAD * 2 });
-    doc.text('pela leitura deste código QR ou pela consulta da', COLS[3] + PAD, y + 79, { width: COL_W[3] - PAD * 2 });
-    doc.text('chave de acesso no portal nacional da NFS-e', COLS[3] + PAD, y + 86, { width: COL_W[3] - PAD * 2 });
+    doc.font('Helvetica').fontSize(5).fillColor('#555555');
+    doc.text('A autenticidade desta NFS-e pode ser', qrX - 40, qrY + 52, { width: 135, align: 'center' });
+    doc.text('verificada pela leitura do QR Code ou', qrX - 40, qrY + 59, { width: 135, align: 'center' });
+    doc.text('pela chave de acesso no portal nacional.', qrX - 40, qrY + 66, { width: 135, align: 'center' });
 
-    // Linha dados da NFS-e (colunas 0-2, y+19)
-    y += 19;
-    hline(doc, y, COLS[0], COLS[3]); // linha abaixo da chave
-    fillCell(doc, COLS[0], y, COLS[1] - COLS[0], 19, GRAY_BG);
-    fillCell(doc, COLS[1], y, COLS[2] - COLS[1], 19, GRAY_BG);
-    fillCell(doc, COLS[2], y, COLS[3] - COLS[2], 19, GRAY_BG);
-    gridH(doc, y, 3);
-    label(doc, COLS[0], y, 'NÚMERO DA NFS-e', COL_W[0]);
-    value(doc, COLS[0], y, nNFSe, COL_W[0]);
-    label(doc, COLS[1], y, 'COMPETÊNCIA DA NFS-e', COL_W[1]);
-    value(doc, COLS[1], y, fmtData(dCompet), COL_W[1]);
-    label(doc, COLS[2], y, 'DATA E HORA DA EMISSÃO DA NFS-e', COL_W[2]);
-    value(doc, COLS[2], y, fmtDataHora(dhProc), COL_W[2]);
+    // ==============================================
+    // DADOS DA NFS-e (lado esquerdo do QR)
+    // ==============================================
+    const dataW = CW - 115;
 
-    // Linha DPS
-    y += 19;
-    hline(doc, y, COLS[0], COLS[3]);
-    fillCell(doc, COLS[0], y, COLS[1] - COLS[0], 19, GRAY_BG);
-    fillCell(doc, COLS[1], y, COLS[2] - COLS[1], 19, GRAY_BG);
-    fillCell(doc, COLS[2], y, COLS[3] - COLS[2], 19, GRAY_BG);
-    gridH(doc, y, 3);
-    label(doc, COLS[0], y, 'NÚMERO DA DPS', COL_W[0]);
-    value(doc, COLS[0], y, nDPS, COL_W[0]);
-    label(doc, COLS[1], y, 'SÉRIE DA DPS', COL_W[1]);
-    value(doc, COLS[1], y, serie, COL_W[1]);
-    label(doc, COLS[2], y, 'DATA E HORA DA EMISSÃO DA DPS', COL_W[2]);
-    value(doc, COLS[2], y, fmtDataHora(dhEmi), COL_W[2]);
+    // Chave de acesso (full width)
+    y = sectionHeader(doc, y, 'CHAVE DE ACESSO DA NFS-e', dataW);
+    hline(doc, y, M, M + dataW, BORDER);
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(BLACK);
+    doc.text(chaveAcesso, M + PAD, y + 2, { width: dataW - PAD * 2, lineBreak: false, characterSpacing: 0.5 });
+    y += 14;
 
-    // Linha Emitente / Situacao / Finalidade
-    y += 19;
-    hline(doc, y, COLS[0], COLS[3]);
-    fillCell(doc, COLS[0], y, COLS[1] - COLS[0], 19, GRAY_BG);
-    fillCell(doc, COLS[1], y, COLS[2] - COLS[1], 19, GRAY_BG);
-    fillCell(doc, COLS[2], y, COLS[3] - COLS[2], 19, GRAY_BG);
-    gridH(doc, y, 3);
-    label(doc, COLS[0], y, 'EMITENTE DA NFS-e', COL_W[0]);
-    value(doc, COLS[0], y, 'Prestador', COL_W[0]);
-    label(doc, COLS[1], y, 'SITUAÇÃO DA NFS-e', COL_W[1]);
-    value(doc, COLS[1], y, 'NFS-e Gerada', COL_W[1]);
-    label(doc, COLS[2], y, 'FINALIDADE', COL_W[2]);
-    value(doc, COLS[2], y, '-', COL_W[2]);
-
-    // ===== PRESTADOR / FORNECEDOR =====
-    y += 19;
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'PRESTADOR / FORNECEDOR', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
-
-    // Linha: CNPJ | IM | Telefone
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Nome / Nome Empresarial', COL_W[0]);
-    label(doc, COLS[1], y, 'CNPJ / CPF / NIF', COL_W[1]);
-    label(doc, COLS[2], y, 'Indicador Municipal (Inscrição)', COL_W[2]);
-    label(doc, COLS[3], y, 'Telefone', COL_W[3]);
+    // Numero da NFS-e | Data/Hora Emissao
+    const halfW = dataW / 2;
+    fillRect(doc, M, y, halfW, 11, GRAY_BG);
+    fillRect(doc, M + halfW, y, halfW, 11, GRAY_BG);
+    hline(doc, y, M, M + dataW, BORDER);
+    vline(doc, M + halfW, y, y + 11, BORDER);
+    doc.font('Helvetica-Bold').fontSize(6).fillColor(BLACK);
+    doc.text('NUMERO DA NFS-e', M + PAD, y + 3, { width: halfW - PAD * 2, lineBreak: false });
+    doc.text('DATA E HORA DA EMISSAO DA NFS-e', M + halfW + PAD, y + 3, { width: halfW - PAD * 2, lineBreak: false });
     y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, emitNome || '', COL_W[0]);
-    value(doc, COLS[1], y, fmtCnpj(emitCnpj), COL_W[1]);
-    value(doc, COLS[2], y, '-', COL_W[2]);
-    value(doc, COLS[3], y, fmtFone(emitFone), COL_W[3]);
+    hline(doc, y, M, M + dataW, BORDER);
+    vline(doc, M + halfW, y, y + 13, BORDER);
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    doc.text(nNFSe, M + PAD, y + 3, { width: halfW - PAD * 2, lineBreak: false });
+    doc.text(fmtDataHora(dhProc), M + halfW + PAD, y + 3, { width: halfW - PAD * 2, lineBreak: false });
     y += 13;
 
-    // Linha: Endereco | Municipio | Codigo IBGE/CEP
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Endereço', COL_W[0]);
-    label(doc, COLS[1], y, 'Município / Sigla UF', COL_W[1]);
-    label(doc, COLS[2], y, 'E-mail', COL_W[2]);
-    label(doc, COLS[3], y, 'Código IBGE / CEP', COL_W[3]);
+    // Numero DPS | Serie DPS | Data/Hora Emissao DPS
+    const thirdW = dataW / 3;
+    fillRect(doc, M, y, thirdW, 11, GRAY_BG);
+    fillRect(doc, M + thirdW, y, thirdW, 11, GRAY_BG);
+    fillRect(doc, M + thirdW * 2, y, thirdW, 11, GRAY_BG);
+    hline(doc, y, M, M + dataW, BORDER);
+    vline(doc, M + thirdW, y, y + 11, BORDER);
+    vline(doc, M + thirdW * 2, y, y + 11, BORDER);
+    doc.font('Helvetica-Bold').fontSize(6).fillColor(BLACK);
+    doc.text('NUMERO DA DPS', M + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text('SERIE DA DPS', M + thirdW + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text('DATA/HORA EMISSAO DPS', M + thirdW * 2 + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
     y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, (emitLgr || '') + ', ' + (emitNro || '') + ', ' + (emitBairro || ''), COL_W[0]);
-    value(doc, COLS[1], y, xLocEmi + ' / ' + (emitUF || ''), COL_W[1]);
-    value(doc, COLS[2], y, emitEmail || '', COL_W[2]);
-    value(doc, COLS[3], y, fmtIBGE(emitCMun) + ' / ' + fmtCep(emitCep), COL_W[3]);
+    hline(doc, y, M, M + dataW, BORDER);
+    vline(doc, M + thirdW, y, y + 13, BORDER);
+    vline(doc, M + thirdW * 2, y, y + 13, BORDER);
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    doc.text(nDPS, M + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text(serie, M + thirdW + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text(fmtDataHora(dhEmi), M + thirdW * 2 + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
     y += 13;
 
-    // Linha: Simples Nacional | Regime Tributacao
-    hline(doc, y, COLS[0], COLS[4]);
-    fillCell(doc, COLS[0], y, COLS[2] - COLS[0], 19, GRAY_BG);
-    gridH(doc, y, 2);
-    label(doc, COLS[0], y, 'Simples Nacional na Data de Competência', COL_W[0]);
-    const snLabel = opSimpNac === '1' ? 'Não Optante' : opSimpNac === '2' ? 'Optante - MEI' : opSimpNac === '3' ? 'Optante - ME ou EPP' : '-';
-    value(doc, COLS[0], y, snLabel, COL_W[0]);
-    label(doc, COLS[1], y, 'Regime de Apuração Tributária pelo SN', COL_W[1]);
-    const regLabel = regApTribSN === '1' ? 'Regime de apuração dos tributos federais e municipal pelo Simples Nacional' : regApTribSN === '2' ? 'Exclusivamente tributos municipais pelo Simples Nacional' : '-';
-    value(doc, COLS[1], y, regLabel, COL_W[1]);
-    hline(doc, y, COLS[2], COLS[4]); // linha direita
-    y += 19;
-
-    // ===== TOMADOR / ADQUIRENTE =====
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'TOMADOR / ADQUIRENTE', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
-
-    // Linha labels
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Nome / Nome Empresarial', COL_W[0]);
-    label(doc, COLS[1], y, 'CNPJ / CPF / NIF', COL_W[1]);
-    label(doc, COLS[2], y, 'Indicador Municipal (Inscrição)', COL_W[2]);
-    label(doc, COLS[3], y, 'Telefone', COL_W[3]);
+    // Competencia | Situacao | Finalidade
+    fillRect(doc, M, y, thirdW, 11, GRAY_BG);
+    fillRect(doc, M + thirdW, y, thirdW, 11, GRAY_BG);
+    fillRect(doc, M + thirdW * 2, y, thirdW, 11, GRAY_BG);
+    hline(doc, y, M, M + dataW, BORDER);
+    vline(doc, M + thirdW, y, y + 11, BORDER);
+    vline(doc, M + thirdW * 2, y, y + 11, BORDER);
+    doc.font('Helvetica-Bold').fontSize(6).fillColor(BLACK);
+    doc.text('COMPETENCIA', M + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text('SITUACAO DA NFS-e', M + thirdW + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text('FINALIDADE', M + thirdW * 2 + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
     y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, tomaNome || '', COL_W[0]);
-    value(doc, COLS[1], y, fmtCnpj(tomaCnpj), COL_W[1]);
-    value(doc, COLS[2], y, '-', COL_W[2]);
-    value(doc, COLS[3], y, fmtFone(tomaFone), COL_W[3]);
+    hline(doc, y, M, M + dataW, BORDER);
+    vline(doc, M + thirdW, y, y + 13, BORDER);
+    vline(doc, M + thirdW * 2, y, y + 13, BORDER);
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    doc.text(fmtData(dCompet), M + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text('NFS-e Gerada', M + thirdW + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
+    doc.text('-', M + thirdW * 2 + PAD, y + 3, { width: thirdW - PAD * 2, lineBreak: false });
     y += 13;
 
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Endereço', COL_W[0]);
-    label(doc, COLS[1], y, 'Município / Sigla UF', COL_W[1]);
-    label(doc, COLS[2], y, 'E-mail', COL_W[2]);
-    label(doc, COLS[3], y, 'Código IBGE / CEP', COL_W[3]);
+    // Fecha area de dados (alinha com o QR code)
+    y = Math.max(y, qrY + 72);
+
+    // ==============================================
+    // PRESTADOR / FORNECEDOR
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'PRESTADOR / FORNECEDOR', CW);
+
+    // Labels
+    const c1 = CW * 0.30;
+    const c2 = CW * 0.25;
+    const c3 = CW * 0.25;
+    const c4 = CW * 0.20;
+    const ws4 = [c1, c2, c3, c4];
+
+    fillRect(doc, M, y, c1, 11, GRAY_BG); fillRect(doc, M + c1, y, c2, 11, GRAY_BG);
+    fillRect(doc, M + c1 + c2, y, c3, 11, GRAY_BG); fillRect(doc, M + c1 + c2 + c3, y, c4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 11, BORDER); vline(doc, M + c1 + c2, y, y + 11, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Nome / Nome Empresarial', 'CNPJ / CPF / NIF', 'Indicador Municipal (IM)', 'Telefone'], ws4);
     y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, (tomaLgr || '') + ', ' + (tomaNro || '') + ', ' + (tomaBairro || ''), COL_W[0]);
-    // Cidade do tomador via IBGE lookup (usamos xLocEmi como fallback)
-    value(doc, COLS[1], y, xLocPrestacao + ' / ' + (emitUF || ''), COL_W[1]);
-    value(doc, COLS[2], y, tomaEmail || '', COL_W[2]);
-    value(doc, COLS[3], y, fmtIBGE(tomaCmun) + ' / ' + fmtCep(tomaCep), COL_W[3]);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 14, BORDER); vline(doc, M + c1 + c2, y, y + 14, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 14, BORDER);
+    valueRow(doc, y, [emitNome || '', fmtCnpj(emitCnpj), emitIM || '-', fmtFone(emitFone)], ws4);
+    y += 14;
+
+    // Endereco | Municipio | Email | CEP
+    fillRect(doc, M, y, c1, 11, GRAY_BG); fillRect(doc, M + c1, y, c2, 11, GRAY_BG);
+    fillRect(doc, M + c1 + c2, y, c3, 11, GRAY_BG); fillRect(doc, M + c1 + c2 + c3, y, c4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 11, BORDER); vline(doc, M + c1 + c2, y, y + 11, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Endere\u00e7o', 'Munic\u00edpio / UF', 'E-mail', 'CEP / IBGE'], ws4);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 14, BORDER); vline(doc, M + c1 + c2, y, y + 14, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 14, BORDER);
+    const endPrest = [emitLgr, emitNro, emitBairro].filter(Boolean).join(', ');
+    valueRow(doc, y, [endPrest, xLocEmi + ' / ' + (emitUF || ''), emitEmail || '', fmtCep(emitCep) + ' / ' + fmtIBGE(emitCMun)], ws4);
+    y += 14;
+
+    // Simples Nacional | Regime Tributacao
+    const halfCW = CW / 2;
+    fillRect(doc, M, y, halfCW, 11, GRAY_BG); fillRect(doc, M + halfCW, y, halfCW, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + halfCW, y, y + 11, BORDER);
+    doc.font('Helvetica-Bold').fontSize(6).fillColor(BLACK);
+    doc.text('Simples Nacional na Data de Compet\u00eancia', M + PAD, y + 3, { width: halfCW - PAD * 2, lineBreak: false });
+    doc.text('Regime de Apura\u00e7\u00e3o Tribut\u00e1ria pelo SN', M + halfCW + PAD, y + 3, { width: halfCW - PAD * 2, lineBreak: false });
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + halfCW, y, y + 13, BORDER);
+    const snLabel = opSimpNac === '1' ? 'N\u00e3o Optante' : opSimpNac === '2' ? 'Optante - MEI' : opSimpNac === '3' ? 'Optante - ME ou EPP' : '-';
+    const regLabel = regApTribSN === '1' ? 'Regime de apura\u00e7\u00e3o dos tributos federais e municipal pelo SN' : regApTribSN === '2' ? 'Exclusivamente tributos municipais pelo SN' : '-';
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    doc.text(snLabel, M + PAD, y + 3, { width: halfCW - PAD * 2, lineBreak: false });
+    doc.text(regLabel, M + halfCW + PAD, y + 3, { width: halfCW - PAD * 2, lineBreak: false });
     y += 13;
 
-    // ===== DESTINATARIO / INTERMEDIARIO =====
-    hline(doc, y, COLS[0], COLS[4]);
-    y += 6;
-    doc.font('Helvetica').fontSize(7).fillColor('#000000');
-    doc.text('DESTINATÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e', COLS[0] + PAD, y, { width: COLS[4] - COLS[0] - PAD * 2 });
-    y += 8;
-    doc.text('INTERMEDIÁRIO DA OPERAÇÃO NÃO IDENTIFICADO NA NFS-e', COLS[0] + PAD, y, { width: COLS[4] - COLS[0] - PAD * 2 });
+    // ==============================================
+    // TOMADOR / ADQUIRENTE
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'TOMADOR / ADQUIRENTE', CW);
+
+    fillRect(doc, M, y, c1, 11, GRAY_BG); fillRect(doc, M + c1, y, c2, 11, GRAY_BG);
+    fillRect(doc, M + c1 + c2, y, c3, 11, GRAY_BG); fillRect(doc, M + c1 + c2 + c3, y, c4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 11, BORDER); vline(doc, M + c1 + c2, y, y + 11, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Nome / Nome Empresarial', 'CNPJ / CPF / NIF', 'Indicador Municipal (IM)', 'Telefone'], ws4);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 14, BORDER); vline(doc, M + c1 + c2, y, y + 14, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 14, BORDER);
+    valueRow(doc, y, [tomaNome || '', fmtCnpj(tomaCnpj), '-', fmtFone(tomaFone)], ws4);
+    y += 14;
+
+    fillRect(doc, M, y, c1, 11, GRAY_BG); fillRect(doc, M + c1, y, c2, 11, GRAY_BG);
+    fillRect(doc, M + c1 + c2, y, c3, 11, GRAY_BG); fillRect(doc, M + c1 + c2 + c3, y, c4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 11, BORDER); vline(doc, M + c1 + c2, y, y + 11, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Endere\u00e7o', 'Munic\u00edpio / UF', 'E-mail', 'CEP / IBGE'], ws4);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + c1, y, y + 14, BORDER); vline(doc, M + c1 + c2, y, y + 14, BORDER); vline(doc, M + c1 + c2 + c3, y, y + 14, BORDER);
+    const endToma = [tomaLgr, tomaNro, tomaBairro].filter(Boolean).join(', ');
+    valueRow(doc, y, [endToma, xLocPrestacao + ' / ' + (emitUF || ''), tomaEmail || '', fmtCep(tomaCep) + ' / ' + fmtIBGE(tomaCmun)], ws4);
+    y += 14;
+
+    // ==============================================
+    // DESTINATARIO / INTERMEDIARIO
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    doc.text('DESTINAT\u00c1RIO DA OPERA\u00c7\u00c3O N\u00c3O IDENTIFICADO NA NFS-e', M + PAD, y + 3, { width: CW - PAD * 2, lineBreak: false });
+    y += 11;
+    doc.text('INTERMEDI\u00c1RIO DA OPERA\u00c7\u00c3O N\u00c3O IDENTIFICADO NA NFS-e', M + PAD, y, { width: CW - PAD * 2, lineBreak: false });
     y += 12;
 
-    // ===== SERVIÇO PRESTADO =====
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'SERVIÇO PRESTADO', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
+    // ==============================================
+    // SERVICO PRESTADO
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'SERVI\u00c7O PRESTADO', CW);
 
-    // Codigo de tributacao | NBS | Local da prestacao
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Código de Tributação Nacional/Municipal', COL_W[0]);
-    label(doc, COLS[1], y, 'Código da NBS', COL_W[1]);
-    label(doc, COLS[2], y, 'Local da Prestação / Sigla UF / País', COL_W[2]);
+    // Codigo tributacao | NBS | Local prestacao
+    const svc1 = CW * 0.30;
+    const svc2 = CW * 0.20;
+    const svc3 = CW * 0.50;
+    const wsSvc = [svc1, svc2, svc3];
+
+    fillRect(doc, M, y, svc1, 11, GRAY_BG); fillRect(doc, M + svc1, y, svc2, 11, GRAY_BG);
+    fillRect(doc, M + svc1 + svc2, y, svc3, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + svc1, y, y + 11, BORDER); vline(doc, M + svc1 + svc2, y, y + 11, BORDER);
+    labelRow(doc, y, ['C\u00f3d. Tributa\u00e7\u00e3o Nacional', 'C\u00f3d. NBS', 'Local da Presta\u00e7\u00e3o / UF / Pa\u00eds'], wsSvc);
     y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, fmtCNAE(cTribNac) + ' / -', COL_W[0]);
-    value(doc, COLS[1], y, fmtNBS(cNBS), COL_W[1]);
-    value(doc, COLS[2], y, xLocPrestacao + ' / ' + (emitUF || '') + ' / -', COL_W[2]);
-    y += 13;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + svc1, y, y + 14, BORDER); vline(doc, M + svc1 + svc2, y, y + 14, BORDER);
+    valueRow(doc, y, [fmtCNAE(cTribNac), fmtNBS(cNBS), xLocPrestacao + ' / ' + (emitUF || '') + ' / -'], wsSvc);
+    y += 14;
 
-    // Descricao do servico (xTribNac como descricao curta, xDescServ como detalhe)
-    hline(doc, y, COLS[0], COLS[4]);
-    doc.font('Helvetica').fontSize(7).fillColor('#000000');
-    doc.text(xTribNac || '', COLS[0] + PAD, y + 2, { width: COLS[4] - COLS[0] - PAD * 2 });
+    // Descricao do servico
+    hline(doc, y, M, M + CW, BORDER);
+    doc.font('Helvetica-Bold').fontSize(6).fillColor(BLACK);
+    doc.text('Descri\u00e7\u00e3o do Servi\u00e7o', M + PAD, y + 2, { width: CW - PAD * 2, lineBreak: false });
+    y += 10;
+    hline(doc, y, M, M + CW, BORDER);
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    const descH = doc.heightOfString(xDescServ || '-', { width: CW - PAD * 2 });
+    doc.text(xDescServ || '-', M + PAD, y + 2, { width: CW - PAD * 2 });
+    y += Math.max(descH, 14) + 6;
+
+    // ==============================================
+    // TRIBUTACAO MUNICIPAL (ISSQN)
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'TRIBUTA\u00c7\u00c3O MUNICIPAL (ISSQN)', CW);
+
+    const iss1 = CW * 0.22;
+    const iss2 = CW * 0.28;
+    const iss3 = CW * 0.25;
+    const iss4 = CW * 0.25;
+    const wsIss = [iss1, iss2, iss3, iss4];
+
+    fillRect(doc, M, y, iss1, 11, GRAY_BG); fillRect(doc, M + iss1, y, iss2, 11, GRAY_BG);
+    fillRect(doc, M + iss1 + iss2, y, iss3, 11, GRAY_BG); fillRect(doc, M + iss1 + iss2 + iss3, y, iss4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + iss1, y, y + 11, BORDER); vline(doc, M + iss1 + iss2, y, y + 11, BORDER); vline(doc, M + iss1 + iss2 + iss3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Tipo Tributa\u00e7\u00e3o ISSQN', 'Munic\u00edpio Incid\u00eancia / UF', 'BC ISSQN', 'Al\u00edquota Aplicada'], wsIss);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + iss1, y, y + 14, BORDER); vline(doc, M + iss1 + iss2, y, y + 14, BORDER); vline(doc, M + iss1 + iss2 + iss3, y, y + 14, BORDER);
+    const tpIssLabel = tribISSQN === '1' ? 'Opera\u00e7\u00e3o Tribut\u00e1vel' : tribISSQN === '2' ? 'Opera\u00e7\u00e3o N\u00e3o Tribut\u00e1vel' : '-';
+    const aliqStr = pAliqISSQN ? (Number(pAliqISSQN) * 100).toFixed(2) + '%' : '-';
+    valueRow(doc, y, [tpIssLabel, xLocEmi + ' / ' + (emitUF || ''), fmtMoeda(vBCISSQN), aliqStr], wsIss);
+    y += 14;
+
+    fillRect(doc, M, y, iss1, 11, GRAY_BG); fillRect(doc, M + iss1, y, iss2, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + iss1, y, y + 11, BORDER); vline(doc, M + iss1 + iss2, y, y + 11, BORDER);
+    labelRow(doc, y, ['Reten\u00e7\u00e3o do ISSQN', 'ISSQN Apurado', '', ''], [iss1, iss2, iss3, iss4]);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + iss1, y, y + 14, BORDER); vline(doc, M + iss1 + iss2, y, y + 14, BORDER);
+    const retISSLabel = tpRetISSQN === '1' ? 'N\u00e3o Retido' : tpRetISSQN === '2' ? 'Retido pelo Tomador' : tpRetISSQN === '3' ? 'Retido pelo Intermedi\u00e1rio' : '-';
+    valueRow(doc, y, [retISSLabel, fmtMoeda(vISSQN), '', ''], [iss1, iss2, iss3, iss4]);
+    y += 14;
+
+    // ==============================================
+    // TRIBUTACAO FEDERAL
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'TRIBUTA\u00c7\u00c3O FEDERAL (EXCETO CBS)', CW);
+
+    const fed1 = CW * 0.20;
+    const fed2 = CW * 0.20;
+    const fed3 = CW * 0.30;
+    const fed4 = CW * 0.30;
+    const wsFed = [fed1, fed2, fed3, fed4];
+
+    fillRect(doc, M, y, fed1, 11, GRAY_BG); fillRect(doc, M + fed1, y, fed2, 11, GRAY_BG);
+    fillRect(doc, M + fed1 + fed2, y, fed3, 11, GRAY_BG); fillRect(doc, M + fed1 + fed2 + fed3, y, fed4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + fed1, y, y + 11, BORDER); vline(doc, M + fed1 + fed2, y, y + 11, BORDER); vline(doc, M + fed1 + fed2 + fed3, y, y + 11, BORDER);
+    labelRow(doc, y, ['PIS', 'COFINS', 'IRRF', 'CSLL'], wsFed);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + fed1, y, y + 14, BORDER); vline(doc, M + fed1 + fed2, y, y + 14, BORDER); vline(doc, M + fed1 + fed2 + fed3, y, y + 14, BORDER);
+    valueRow(doc, y, [fmtMoeda(vPIS), fmtMoeda(vCOFINS), fmtMoeda(vIR), fmtMoeda(vCSLL)], wsFed);
+    y += 14;
+
+    fillRect(doc, M, y, fed1, 11, GRAY_BG); fillRect(doc, M + fed1, y, fed2, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + fed1, y, y + 11, BORDER); vline(doc, M + fed1 + fed2, y, y + 11, BORDER);
+    labelRow(doc, y, ['Contrib. Previdenci\u00e1ria - Retida', 'Descri\u00e7\u00e3o Contrib. Sociais', '', ''], [fed1, fed2, fed3, fed4]);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + fed1, y, y + 14, BORDER); vline(doc, M + fed1 + fed2, y, y + 14, BORDER);
+    valueRow(doc, y, [fmtMoeda(vINSS), '0 - PIS/COFINS/CSLL N\u00e3o Retidos', '', ''], [fed1, fed2, fed3, fed4]);
+    y += 14;
+
+    // ==============================================
+    // TRIBUTACAO IBS/CBS
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'TRIBUTA\u00c7\u00c3O IBS/CBS', CW);
+
+    const ibs1 = CW * 0.25;
+    const ibs2 = CW * 0.25;
+    const ibs3 = CW * 0.25;
+    const ibs4 = CW * 0.25;
+    const wsIbs = [ibs1, ibs2, ibs3, ibs4];
+
+    fillRect(doc, M, y, ibs1, 11, GRAY_BG); fillRect(doc, M + ibs1, y, ibs2, 11, GRAY_BG);
+    fillRect(doc, M + ibs1 + ibs2, y, ibs3, 11, GRAY_BG); fillRect(doc, M + ibs1 + ibs2 + ibs3, y, ibs4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + ibs1, y, y + 11, BORDER); vline(doc, M + ibs1 + ibs2, y, y + 11, BORDER); vline(doc, M + ibs1 + ibs2 + ibs3, y, y + 11, BORDER);
+    labelRow(doc, y, ['CST / cClassTrib', 'Indicador / C\u00f3d. IBGE / Munic\u00edpio / UF', 'Excl. e Red. BC', 'BC Ap\u00f3s Excl./Red.'], wsIbs);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + ibs1, y, y + 14, BORDER); vline(doc, M + ibs1 + ibs2, y, y + 14, BORDER); vline(doc, M + ibs1 + ibs2 + ibs3, y, y + 14, BORDER);
+    valueRow(doc, y, ['- / -', '- / - / - / -', fmtMoeda('0'), '-'], wsIbs);
+    y += 14;
+
+    fillRect(doc, M, y, ibs1, 11, GRAY_BG); fillRect(doc, M + ibs1, y, ibs2, 11, GRAY_BG);
+    fillRect(doc, M + ibs1 + ibs2, y, ibs3, 11, GRAY_BG); fillRect(doc, M + ibs1 + ibs2 + ibs3, y, ibs4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + ibs1, y, y + 11, BORDER); vline(doc, M + ibs1 + ibs2, y, y + 11, BORDER); vline(doc, M + ibs1 + ibs2 + ibs3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Red. Al\u00edq. IBS / CBS', 'Al\u00edquota IBS UF / Mun', 'Al\u00edquota CBS', 'Val. Apurado IBS / CBS'], wsIbs);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + ibs1, y, y + 14, BORDER); vline(doc, M + ibs1 + ibs2, y, y + 14, BORDER); vline(doc, M + ibs1 + ibs2 + ibs3, y, y + 14, BORDER);
+    valueRow(doc, y, ['- / -', '- / -', '-', '- / -'], wsIbs);
+    y += 14;
+
+    // ==============================================
+    // VALORES
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'VALOR TOTAL DA NFS-e', CW);
+
+    const val1 = CW * 0.25;
+    const val2 = CW * 0.25;
+    const val3 = CW * 0.25;
+    const val4 = CW * 0.25;
+    const wsVal = [val1, val2, val3, val4];
+
+    fillRect(doc, M, y, val1, 11, GRAY_BG); fillRect(doc, M + val1, y, val2, 11, GRAY_BG);
+    fillRect(doc, M + val1 + val2, y, val3, 11, GRAY_BG); fillRect(doc, M + val1 + val2 + val3, y, val4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + val1, y, y + 11, BORDER); vline(doc, M + val1 + val2, y, y + 11, BORDER); vline(doc, M + val1 + val2 + val3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Valor Servi\u00e7os', 'Dedu\u00e7\u00f5es Permitidas', 'Desconto Incondicionado', 'Desconto Condicionado'], wsVal);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + val1, y, y + 14, BORDER); vline(doc, M + val1 + val2, y, y + 14, BORDER); vline(doc, M + val1 + val2 + val3, y, y + 14, BORDER);
+    valueRow(doc, y, [fmtMoeda(vServ), fmtMoeda(vDed), fmtMoeda(vDescIncond), fmtMoeda(vDescCond)], wsVal);
+    y += 14;
+
+    fillRect(doc, M, y, val1, 11, GRAY_BG); fillRect(doc, M + val1, y, val2, 11, GRAY_BG);
+    fillRect(doc, M + val1 + val2, y, val3, 11, GRAY_BG); fillRect(doc, M + val1 + val2 + val3, y, val4, 11, GRAY_BG);
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + val1, y, y + 11, BORDER); vline(doc, M + val1 + val2, y, y + 11, BORDER); vline(doc, M + val1 + val2 + val3, y, y + 11, BORDER);
+    labelRow(doc, y, ['Total Reten\u00e7\u00f5es', 'VALOR L\u00cdQUIDO DA NFS-e', 'Total IBS/CBS', 'VL L\u00cdQUIDO + IBS/CBS'], wsVal);
+    y += 11;
+    hline(doc, y, M, M + CW, BORDER);
+    vline(doc, M + val1, y, y + 16, BORDER); vline(doc, M + val1 + val2, y, y + 16, BORDER); vline(doc, M + val1 + val2 + val3, y, y + 16, BORDER);
+    // Valor liquido em destaque
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(BLACK);
+    doc.text(fmtMoeda(vLiq), M + val1 + val2 + PAD, y + 4, { width: val2 - PAD * 2, lineBreak: false });
+    doc.font('Helvetica').fontSize(7).fillColor(BLACK);
+    doc.text('-', M + PAD, y + 4, { width: val1 - PAD * 2, lineBreak: false });
+    doc.text(fmtMoeda('0'), M + val1 + val2 + val3 + PAD, y + 4, { width: val3 - PAD * 2, lineBreak: false });
+    doc.text(fmtMoeda('0'), M + val1 + val2 + val3 + val4 - (M + val1 + val2 + val3) + PAD, y + 4, { width: val4 - PAD * 2, lineBreak: false });
+    y += 16;
+
+    // ==============================================
+    // INFORMACOES COMPLEMENTARES
+    // ==============================================
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    y = sectionHeader(doc, y, 'INFORMA\u00c7\u00d5ES COMPLEMENTARES', CW);
+    hline(doc, y, M, M + CW, BORDER);
+    doc.font('Helvetica').fontSize(6).fillColor('#555555');
+    doc.text('Totais aproximados dos Tributos cfe. Lei n\u00b0 12.741/2012: Federais: -; Estaduais: -; Municipais: -;', M + PAD, y + 3, { width: CW - PAD * 2 });
     y += 12;
-    hline(doc, y, COLS[0], COLS[4]);
-    doc.font('Helvetica-Bold').fontSize(6).fillColor('#000000');
-    doc.text('Descrição do Serviço', COLS[0] + PAD, y + 2, { width: COLS[4] - COLS[0] - PAD * 2 });
-    y += 9;
-    // Texto da descricao pode ser longo - wrap
-    doc.font('Helvetica').fontSize(7).fillColor('#000000');
-    const descLines = doc.heightOfString(xDescServ || '-', { width: COLS[4] - COLS[0] - PAD * 2 });
-    doc.text(xDescServ || '-', COLS[0] + PAD, y + 2, { width: COLS[4] - COLS[0] - PAD * 2 });
-    y += Math.max(descLines, 16) + 6;
 
-    // ===== TRIBUTAÇÃO MUNICIPAL (ISSQN) =====
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'TRIBUTAÇÃO MUNICIPAL (ISSQN)', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
+    // ==============================================
+    // RODAPE - Assinaturas
+    // ==============================================
+    y = Math.max(y, PH - M - 46);
+    hline(doc, y, M, M + CW, BLACK, 0.7);
+    const footH = 34;
+    const footW3 = CW / 3;
+    hline(doc, y + footH, M, M + CW, BLACK, 0.7);
+    vline(doc, M + footW3, y, y + footH, BORDER);
+    vline(doc, M + footW3 * 2, y, y + footH, BORDER);
 
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Tipo de Tributação do ISSQN', COL_W[0]);
-    label(doc, COLS[1], y, 'Município / Sigla UF / País de Incidência do ISSQN', COL_W[1]);
-    label(doc, COLS[2], y, 'BC ISSQN', COL_W[2]);
-    label(doc, COLS[3], y, 'Alíquota Aplicada', COL_W[3]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    const tpIssLabel = tribISSQN === '1' ? 'Operação Tributável' : tribISSQN === '2' ? 'Operação Não Tributável' : '-';
-    value(doc, COLS[0], y, tpIssLabel, COL_W[0]);
-    value(doc, COLS[1], y, xLocEmi + ' / ' + (emitUF || '') + ' / -', COL_W[1]);
-    value(doc, COLS[2], y, '-', COL_W[2]);
-    value(doc, COLS[3], y, '-', COL_W[3]);
-    y += 13;
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Retenção do ISSQN', COL_W[0]);
-    label(doc, COLS[1], y, 'ISSQN Apurado', COL_W[1]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    const retISSLabel = tpRetISSQN === '1' ? 'Não Retido' : tpRetISSQN === '2' ? 'Retido pelo Tomador' : tpRetISSQN === '3' ? 'Retido pelo Intermediário' : '-';
-    value(doc, COLS[0], y, retISSLabel, COL_W[0]);
-    value(doc, COLS[1], y, '-', COL_W[1]);
-    y += 13;
-
-    // ===== TRIBUTAÇÃO FEDERAL =====
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'TRIBUTAÇÃO FEDERAL (EXCETO CBS)', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
-
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'IRRF', COL_W[0]);
-    label(doc, COLS[1], y, 'Contribuição Previdenciária - Retida', COL_W[1]);
-    label(doc, COLS[2], y, 'Contribuições Sociais - Retidas', COL_W[2]);
-    label(doc, COLS[3], y, 'PIS - Débito Apuração Própria', COL_W[3]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, '-', COL_W[0]);
-    value(doc, COLS[1], y, '-', COL_W[1]);
-    value(doc, COLS[2], y, '-', COL_W[2]);
-    value(doc, COLS[3], y, '-', COL_W[3]);
-    y += 13;
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'COFINS - Débito Apuração Própria', COL_W[0]);
-    label(doc, COLS[1], y, 'Descrição Contrib. Sociais - Retidas', COL_W[1]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, '-', COL_W[0]);
-    value(doc, COLS[1], y, '0 - PIS/COFINS/CSLL Não Retidos', COL_W[1]);
-    y += 13;
-
-    // ===== TRIBUTAÇÃO IBS/CBS =====
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'TRIBUTAÇÃO IBS/CBS', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
-
-    // Linha 1
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'CST / cClassTrib', COL_W[0]);
-    label(doc, COLS[1], y, 'Indicador de Operação / Código IBGE Incidência / Município Incidência / Sigla UF', COL_W[1]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, '- / -', COL_W[0]);
-    value(doc, COLS[1], y, '- / - / - / -', COL_W[1]);
-    y += 13;
-
-    // Linha 2
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Exclusões e Reduções da Base de Cálculo', COL_W[0]);
-    label(doc, COLS[1], y, 'Base de Cálculo Após Exclusões e Reduções', COL_W[1]);
-    label(doc, COLS[2], y, 'Red. Alíquota IBS / Red. Alíquota CBS', COL_W[2]);
-    label(doc, COLS[3], y, 'Alíquota - IBS UF / IBS Mun', COL_W[3]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, fmtMoeda('0'), COL_W[0]);
-    value(doc, COLS[1], y, '-', COL_W[1]);
-    value(doc, COLS[2], y, '- / - / -', COL_W[2]);
-    value(doc, COLS[3], y, '- / -', COL_W[3]);
-    y += 13;
-
-    // Linhas 3-7 (todos traços)
-    const ibsLabels = [
-      ['Alíq. Efetiva Municipal - IBS', 'Valor Apurado Municipal - IBS', 'Alíq. Efetiva Estadual - IBS', 'Valor Apurado Estadual - IBS'],
-      ['Valor Total Apurado - IBS', 'Alíquota - CBS', 'Alíquota Efetiva - CBS', 'Valor Total Apurado - CBS'],
-    ];
-    for (const row of ibsLabels) {
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    for (let i = 0; i < 4; i++) label(doc, COLS[i], y, row[i], COL_W[i]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    for (let i = 0; i < 4; i++) value(doc, COLS[i], y, '-', COL_W[i]);
-    y += 13;
-    }
-
-    // ===== VALOR TOTAL DA NFS-e =====
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'VALOR TOTAL DA NFS-e', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
-
-    // Linha 1: Valor operacao | Desconto Incond | Desconto Cond
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[1], y, 'VALOR DA OPERAÇÃO / SERVIÇO', COL_W[1]);
-    label(doc, COLS[2], y, 'Desconto Incondicionado', COL_W[2]);
-    label(doc, COLS[3], y, 'Desconto Condicionado', COL_W[3]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[1], y, fmtMoeda(vServ), COL_W[1]);
-    value(doc, COLS[2], y, '-', COL_W[2]);
-    value(doc, COLS[3], y, '-', COL_W[3]);
-    y += 13;
-
-    // Linha 2: Retencoes | Valor Liquido | Total IBS/CBS | VL + IBS/CBS
-    hline(doc, y, COLS[0], COLS[4]);
-    gridH(doc, y, 4);
-    label(doc, COLS[0], y, 'Total das Retenções (ISSQN / Federais)', COL_W[0]);
-    label(doc, COLS[1], y, 'VALOR LÍQUIDO DA NFS-e', COL_W[1]);
-    label(doc, COLS[2], y, 'Total do IBS/CBS', COL_W[2]);
-    label(doc, COLS[3], y, 'VALOR LÍQUIDO DA NFS-e + IBS/CBS', COL_W[3]);
-    y += 11;
-    hline(doc, y, COLS[0], COLS[4]);
-    value(doc, COLS[0], y, '-', COL_W[0]);
-    value(doc, COLS[1], y, fmtMoeda(vLiq), COL_W[1]);
-    value(doc, COLS[2], y, fmtMoeda('0'), COL_W[2]);
-    value(doc, COLS[3], y, fmtMoeda('0'), COL_W[3]);
-    y += 13;
-
-    // ===== INFORMAÇÕES COMPLEMENTARES =====
-    hline(doc, y, COLS[0], COLS[4]);
-    sectionHeader(doc, y, 'INFORMAÇÕES COMPLEMENTARES', 0, 4);
-    gridH(doc, y, 4);
-    y += 19;
-    hline(doc, y, COLS[0], COLS[4]);
-    doc.font('Helvetica').fontSize(7).fillColor('#000000');
-    const tribText = 'Totais aproximados dos Tributos cfe. Lei n° 12.741/2012: Federais: -; Estaduais: -; Municipais: -;';
-    doc.text(tribText, COLS[0] + PAD, y + 3, { width: COLS[4] - COLS[0] - PAD * 2 });
-    y += 15;
-
-    // Preenche ate o rodape
-    y = Math.max(y, 660);
-
-    // ===== RODAPÉ - 3 caixas de assinatura =====
-    const footY = 796;
-    hline(doc, footY, COLS[0], COLS[4]);
-    hline(doc, footY + 20, COLS[0], COLS[4]);
-    vline(doc, COLS[1], footY, footY + 20);
-    vline(doc, COLS[2], footY, footY + 20);
-    vline(doc, COLS[3], footY, footY + 20);
+    doc.font('Helvetica').fontSize(6).fillColor('#888888');
+    doc.text('Data de Cientifica\u00e7\u00e3o', M + PAD, y + footH - 10, { width: footW3 - PAD * 2, align: 'center' });
+    doc.text('Identifica\u00e7\u00e3o e Assinatura', M + footW3 + PAD, y + footH - 10, { width: footW3 - PAD * 2, align: 'center' });
+    doc.text('Identifica\u00e7\u00e3o e Assinatura', M + footW3 * 2 + PAD, y + footH - 10, { width: footW3 - PAD * 2, align: 'center' });
 
     doc.end();
   });

@@ -1,9 +1,10 @@
 /**
- * routes/nfse.js — Rotas de emissao e cancelamento de NFS-e
+ * routes/nfse.js — Rotas de emissao, cancelamento e re-anexo de NFS-e
  * ===============================================================
  * POST /api/v1/nfse/emitir          — Emitir NFS-e por move_id
  * POST /api/v1/nfse/cancelar        — Cancelar NFS-e
  * POST /api/v1/nfse/process-pending — Processar pendentes (polling/cron)
+ * POST /api/v1/nfse/re-attach       — Re-anexar XML/PDF a NF ja emitida
  */
 
 const express = require('express');
@@ -11,6 +12,9 @@ const router = express.Router();
 const config = require('../config');
 const { processPendingEmissions } = require('../services/nfse-odoo-emit');
 const { cancelarNfse } = require('../services/nfse-cancelamento');
+const { gerarPdfDanfse } = require('../services/nfse-pdf');
+const { carregarCertificado } = require('../services/firebase-cert');
+const { consultarNfse } = require('../services/nfse-client');
 const xmlrpc = require('xmlrpc');
 
 function apiKeyAuth(req, res, next) {
@@ -77,12 +81,21 @@ router.post('/cancelar', apiKeyAuth, async (req, res) => {
     const cnpjPrest = (company.cnpj_cpf || '').replace(/[^0-9]/g, '');
     const just = justificativa || 'Cancelamento solicitado pelo emitente via Odoo';
 
+    const chaveAcesso = move.x_nytro_nfse_codigo_verificacao || '';
+    console.log('[NFSE-CANCEL] Chave de acesso: ' + chaveAcesso);
+
+    if (!chaveAcesso) {
+      return res.json({
+        sucesso: false,
+        xMotivo: 'Chave de acesso nao encontrada no Odoo (x_nytro_nfse_codigo_verificacao vazio). Reemita a nota.',
+      });
+    }
+
     const resultado = await cancelarNfse({
       nNFSe: move.x_nytro_nfse_numero || '',
-      nDFSe: move.x_nytro_nfse_codigo_verificacao || '',
+      chaveAcesso: chaveAcesso,
       cnpjPrest,
       justificativa: just,
-      infNfseId: '', // nao precisamos para cancelamento simples
     });
 
     if (resultado.sucesso) {
@@ -92,6 +105,22 @@ router.post('/cancelar', apiKeyAuth, async (req, res) => {
         x_nytro_nfse_erro: false,
         x_nytro_nfse_mensagem: 'Cancelada: ' + (resultado.xMotivo || ''),
       });
+
+      // 5. Posta mensagem no chatter
+      try {
+        const uid = await odooAuthenticate();
+        const client = odooClient();
+        await new Promise((resolve, reject) => {
+          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+            model: 'account.move',
+            res_id: move_id,
+            body: '<b>NFS-e Cancelada</b><br/>Justificativa: ' + just,
+            message_type: 'comment',
+          }]], (err, result) => err ? reject(err) : resolve(result));
+        });
+      } catch (e) {
+        console.warn('[NFSE-CANCEL] Falha ao postar mensagem no chatter:', e.message);
+      }
     }
 
     res.json(resultado);
@@ -178,5 +207,105 @@ async function odooWrite(moveId, data) {
     });
   });
 }
+
+// === Re-anexar XML/PDF a NF ja emitida ===
+router.post('/re-attach', apiKeyAuth, async (req, res) => {
+  try {
+    const { move_id, chave_acesso } = req.body;
+    if (!move_id) return res.status(400).json({ erro: 'move_id obrigatorio' });
+
+    console.log('[NFSE-RE-ATTACH] move_id=' + move_id);
+
+    const uid = await odooAuthenticate();
+    const client = odooClient();
+
+    // 1. Le a fatura
+    const moves = await new Promise((resolve, reject) => {
+      client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'account.move', 'read', [[move_id]], {
+        fields: ['name', 'x_nytro_nfse_status', 'x_nytro_nfse_numero', 'x_nytro_nfse_codigo_verificacao', 'x_nytro_nfse_xml'],
+      }], (err, result) => err ? reject(err) : resolve(result));
+    });
+
+    if (!moves || !moves.length) return res.status(404).json({ erro: 'Fatura nao encontrada' });
+    const move = moves[0];
+    console.log('[NFSE-RE-ATTACH] Fatura: ' + move.name + ' Status: ' + move.x_nytro_nfse_status);
+
+    const chave = chave_acesso || move.x_nytro_nfse_codigo_verificacao || '';
+    const numNF = move.x_nytro_nfse_numero || '?';
+    let nfseXml = move.x_nytro_nfse_xml || '';
+
+    // 2. Se tem a chave, consulta a SEFIN para pegar o XML completo
+    if (chave && !nfseXml) {
+      console.log('[NFSE-RE-ATTACH] Consultando SEFIN pela chave: ' + chave);
+      const cert = await carregarCertificado();
+      if (cert) {
+        const consulta = await consultarNfse(chave, cert);
+        if (consulta.sucesso && consulta.dados && consulta.dados.nfseXml) {
+          nfseXml = consulta.dados.nfseXml;
+          console.log('[NFSE-RE-ATTACH] XML obtido da SEFIN: ' + nfseXml.length + ' bytes');
+        }
+      }
+    }
+
+    if (!nfseXml) {
+      return res.json({ sucesso: false, erro: 'XML da NFS-e nao disponivel (nem no Odoo, nem na SEFIN)' });
+    }
+
+    // 3. Upload XML
+    try {
+      const xmlNome = 'NFS-e-' + String(numNF).padStart(6, '0') + '.xml';
+      const xmlB64 = Buffer.from(nfseXml, 'utf-8').toString('base64');
+      const attachId = await new Promise((resolve, reject) => {
+        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
+          name: xmlNome, datas: xmlB64, datas_fname: xmlNome,
+          res_model: 'account.move', res_id: move_id, mimetype: 'application/xml',
+        }]], (err, id) => err ? reject(err) : resolve(id));
+      });
+      // Vincula a mensagem no chatter
+      await new Promise((resolve, reject) => {
+        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+          model: 'account.move', res_id: move_id,
+          body: '<b>XML NFS-e ' + numNF + '</b> (re-anexado)',
+          message_type: 'comment',
+          attachment_ids: [[6, 0, [attachId]]],
+        }]], (err, id) => err ? reject(err) : resolve(id));
+      });
+      console.log('[NFSE-RE-ATTACH] XML anexado: ' + xmlNome + ' (attach_id=' + attachId + ')');
+    } catch (e) {
+      console.error('[NFSE-RE-ATTACH] Falha XML:', e.message);
+    }
+
+    // 4. Gera e upload PDF
+    try {
+      const pdfNome = 'DANFSE-' + String(numNF).padStart(6, '0') + '.pdf';
+      console.log('[NFSE-RE-ATTACH] Gerando PDF...');
+      const pdfBuf = await gerarPdfDanfse(nfseXml);
+      console.log('[NFSE-RE-ATTACH] PDF gerado: ' + pdfBuf.length + ' bytes');
+      const pdfB64 = pdfBuf.toString('base64');
+      const attachId = await new Promise((resolve, reject) => {
+        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
+          name: pdfNome, datas: pdfB64, datas_fname: pdfNome,
+          res_model: 'account.move', res_id: move_id, mimetype: 'application/pdf',
+        }]], (err, id) => err ? reject(err) : resolve(id));
+      });
+      await new Promise((resolve, reject) => {
+        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+          model: 'account.move', res_id: move_id,
+          body: '<b>PDF DANFSe ' + numNF + '</b> (re-anexado)',
+          message_type: 'comment',
+          attachment_ids: [[6, 0, [attachId]]],
+        }]], (err, id) => err ? reject(err) : resolve(id));
+      });
+      console.log('[NFSE-RE-ATTACH] PDF anexado: ' + pdfNome + ' (attach_id=' + attachId + ')');
+    } catch (e) {
+      console.error('[NFSE-RE-ATTACH] Falha PDF:', e.message);
+    }
+
+    res.json({ sucesso: true, mensagem: 'Re-anexo concluido para ' + move.name });
+  } catch (err) {
+    console.error('[NFSE-RE-ATTACH] Erro:', err.message);
+    res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
 
 module.exports = router;

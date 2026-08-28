@@ -326,25 +326,32 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     try {
       if (resultado.xmlRetorno) {
         const numNF = resultado.nNFSe || proximoNumero;
+        const xmlNome = 'NFS-e-' + String(numNF).padStart(6, '0') + '.xml';
+        console.log('[NFSE-EMIT] Anexando XML: ' + xmlNome + ' (' + resultado.xmlRetorno.length + ' chars)...');
         await uploadAnexo(client, db, uid, 'account.move', moveId,
-          'NFS-e-' + String(numNF).padStart(6, '0') + '.xml',
-          resultado.xmlRetorno, 'application/xml');
+          xmlNome, resultado.xmlRetorno, 'application/xml',
+          '<b>XML NFS-e ' + numNF + '</b>');
+      } else {
+        console.warn('[NFSE-EMIT] xmlRetorno vazio/nulo — nao e possivel anexar XML nem gerar PDF');
       }
     } catch (e) {
-      console.warn('[NFSE-EMIT] Falha ao anexar XML:', e.message);
+      console.error('[NFSE-EMIT] Falha ao anexar XML:', e.message, e.stack);
     }
 
     // 15. Gera e anexa PDF DANFSE ao chatter
     try {
       if (resultado.xmlRetorno) {
         const numNF = resultado.nNFSe || proximoNumero;
+        const pdfNome = 'DANFSE-' + String(numNF).padStart(6, '0') + '.pdf';
+        console.log('[NFSE-EMIT] Gerando PDF DANFSE...');
         const pdfBuf = await gerarPdfDanfse(resultado.xmlRetorno);
+        console.log('[NFSE-EMIT] PDF gerado: ' + pdfBuf.length + ' bytes. Anexando...');
         await uploadAnexo(client, db, uid, 'account.move', moveId,
-          'DANFSE-' + String(numNF).padStart(6, '0') + '.pdf',
-          pdfBuf, 'application/pdf');
+          pdfNome, pdfBuf, 'application/pdf',
+          '<b>PDF DANFSe ' + numNF + '</b>');
       }
     } catch (e) {
-      console.warn('[NFSE-EMIT] Falha ao anexar PDF DANFSE:', e.message);
+      console.error('[NFSE-EMIT] Falha ao anexar PDF DANFSE:', e.message, e.stack);
     }
 
     return { sucesso: true, nNFSe: resultado.nNFSe, chaveAcesso: resultado.chaveAcesso, nDFSe: resultado.nDFSe };
@@ -378,30 +385,56 @@ async function safeUpdateError(client, db, uid, moveId, errMsg) {
 
 // === Upload de anexos ao chatter do Odoo ===
 /**
- * Cria um ir.attachment no Odoo vinculado ao registro, aparecendo no chatter.
+ * Cria um ir.attachment no Odoo e vincula a uma mail.message no chatter.
+ * No Odoo 17+, apenas criar ir.attachment com res_model/res_id pode nao
+ * exibir no chatter. A solucao e criar o anexo e depois vincular a uma mensagem.
+ *
  * @param {object} client - XML-RPC client
  * @param {string} db - Odoo database
  * @param {number} uid - User ID
  * @param {string} model - res_model (ex: 'account.move')
  * @param {number} resId - ID do registro
  * @param {string} nome - Nome do arquivo (ex: 'NFS-e-19.xml')
- * @param {string} conteudo - Conteudo do arquivo (string ou Buffer)
+ * @param {string|Buffer} conteudo - Conteudo do arquivo
  * @param {string} mimetype - MIME type
+ * @param {string} [msgBody] - Texto HTML da mensagem (opcional)
+ * @returns {number} ID do attachment criado
  */
-async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimetype) {
+async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimetype, msgBody) {
   const dados = Buffer.isBuffer(conteudo)
     ? conteudo.toString('base64')
     : Buffer.from(conteudo, 'utf-8').toString('base64');
-  const attachment = await executeKw(client, db, uid, 'ir.attachment', 'create', [{
+
+  console.log('[NFSE-EMIT] Criando anexo: ' + nome + ' (' + Math.round(dados.length * 0.75) + ' bytes)...');
+
+  // 1. Cria o attachment
+  const attachValues = {
     name: nome,
     datas: dados,
     datas_fname: nome,
     res_model: model,
     res_id: resId,
     mimetype: mimetype,
-  }]);
-  console.log('[NFSE-EMIT] Anexo criado: ' + nome + ' (id=' + attachment + ', ' + Math.round(dados.length * 0.75) + ' bytes)');
-  return attachment;
+  };
+  const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
+  console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId);
+
+  // 2. Cria mail.message vinculando o attachment ao chatter
+  try {
+    const body = msgBody || 'Anexo: ' + nome;
+    await executeKw(client, db, uid, 'mail.message', 'create', [{
+      model: model,
+      res_id: resId,
+      body: body,
+      message_type: 'comment',
+      attachment_ids: [[6, 0, [attachmentId]]],
+    }]);
+    console.log('[NFSE-EMIT] mail.message criada com anexo ' + nome);
+  } catch (msgErr) {
+    console.warn('[NFSE-EMIT] mail.message falhou (anexo ainda existe como ir.attachment id=' + attachmentId + '):', msgErr.message);
+  }
+
+  return attachmentId;
 }
 
 module.exports = { processPendingEmissions };
