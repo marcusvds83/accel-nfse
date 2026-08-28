@@ -55,36 +55,52 @@ router.post('/emitir', apiKeyAuth, async (req, res) => {
 
 // === Cancelar NFS-e ===
 router.post('/cancelar', apiKeyAuth, async (req, res) => {
+  const t0 = Date.now();
   try {
     const { move_id, justificativa } = req.body;
-    if (!move_id) return res.status(400).json({ erro: 'move_id obrigatorio' });
+    if (!move_id) {
+      console.log('[NFSE-CANCEL] Rejeitado: move_id nao informado no body');
+      return res.status(400).json({ erro: 'move_id obrigatorio' });
+    }
 
-    console.log('[NFSE-CANCEL] Solicitacao move_id=' + move_id);
+    console.log('=============================================================');
+    console.log('[NFSE-CANCEL] INICIO - move_id=' + move_id + ' | justificativa: ' + (justificativa || '(padrao)'));
 
     // 1. Le dados da fatura no Odoo
+    console.log('[NFSE-CANCEL] Etapa 1/5: Lendo fatura no Odoo...');
     const result = await odooRead(move_id);
     if (!result) {
+      console.log('[NFSE-CANCEL] Fatura move_id=' + move_id + ' NAO encontrada no Odoo');
       return res.status(404).json({ sucesso: false, erro: 'Fatura nao encontrada' });
     }
 
     const { move, company } = result;
+    console.log('[NFSE-CANCEL] Fatura encontrada: ' + move.name + ' | Status NFSe: ' + (move.x_nytro_nfse_status || 'vazio') + ' | NFSe numero: ' + (move.x_nytro_nfse_numero || 'n/a'));
 
     // 2. Verifica status
+    console.log('[NFSE-CANCEL] Etapa 2/5: Verificando status da NFS-e...');
     if (move.x_nytro_nfse_status !== 'autorizada') {
+      const statusAtual = move.x_nytro_nfse_status || 'vazio';
+      console.log('[NFSE-CANCEL] BLOQUEADO: Status atual e "' + statusAtual + '", precisa ser "autorizada"');
       return res.json({
         sucesso: false,
-        xMotivo: 'NFS-e precisa estar autorizada. Status atual: ' + (move.x_nytro_nfse_status || 'vazio'),
+        xMotivo: 'NFS-e precisa estar autorizada. Status atual: ' + statusAtual,
       });
     }
+    console.log('[NFSE-CANCEL] Status OK: autorizada');
 
     // 3. Cancela no SPED
-    const cnpjPrest = (company.cnpj_cpf || '').replace(/[^0-9]/g, '');
+    console.log('[NFSE-CANCEL] Etapa 3/5: Enviando cancelamento para SEFIN...');
+    const cnpjPrest = (company ? company.cnpj_cpf || '' : '').replace(/[^0-9]/g, '');
     const just = justificativa || 'Cancelamento solicitado pelo emitente via Odoo';
 
     const chaveAcesso = move.x_nytro_nfse_codigo_verificacao || '';
     console.log('[NFSE-CANCEL] Chave de acesso: ' + chaveAcesso);
+    console.log('[NFSE-CANCEL] CNPJ prestador: ' + cnpjPrest);
+    console.log('[NFSE-CANCEL] nNFSe: ' + (move.x_nytro_nfse_numero || 'n/a'));
 
     if (!chaveAcesso) {
+      console.log('[NFSE-CANCEL] BLOQUEADO: Chave de acesso vazia no campo x_nytro_nfse_codigo_verificacao');
       return res.json({
         sucesso: false,
         xMotivo: 'Chave de acesso nao encontrada no Odoo (x_nytro_nfse_codigo_verificacao vazio). Reemita a nota.',
@@ -98,19 +114,24 @@ router.post('/cancelar', apiKeyAuth, async (req, res) => {
       justificativa: just,
     });
 
+    console.log('[NFSE-CANCEL] Retorno SEFIN: sucesso=' + resultado.sucesso + ' | cStat=' + (resultado.cStat || 'n/a') + ' | xMotivo=' + (resultado.xMotivo || ''));
+
     if (resultado.sucesso) {
       // 4. Atualiza Odoo
+      console.log('[NFSE-CANCEL] Etapa 4/5: Atualizando status no Odoo para "cancelada"...');
       await odooWrite(move_id, {
         x_nytro_nfse_status: 'cancelada',
         x_nytro_nfse_erro: false,
         x_nytro_nfse_mensagem: 'Cancelada: ' + (resultado.xMotivo || ''),
       });
+      console.log('[NFSE-CANCEL] Status atualizado no Odoo com sucesso');
 
       // 5. Posta mensagem no chatter
+      console.log('[NFSE-CANCEL] Etapa 5/5: Postando mensagem no chatter...');
       try {
         const uid = await odooAuthenticate();
         const client = odooClient();
-        await new Promise((resolve, reject) => {
+        const msgId = await new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
             model: 'account.move',
             res_id: move_id,
@@ -118,14 +139,21 @@ router.post('/cancelar', apiKeyAuth, async (req, res) => {
             message_type: 'comment',
           }]], (err, result) => err ? reject(err) : resolve(result));
         });
+        console.log('[NFSE-CANCEL] Mensagem postada no chatter: mail.message id=' + msgId);
       } catch (e) {
-        console.warn('[NFSE-CANCEL] Falha ao postar mensagem no chatter:', e.message);
+        console.error('[NFSE-CANCEL] Falha ao postar mensagem no chatter:', e.message);
       }
+    } else {
+      console.log('[NFSE-CANCEL] Cancelamento NEGADO pela SEFIN. Nao foi atualizado o status no Odoo.');
     }
+
+    const duracao = Date.now() - t0;
+    console.log('[NFSE-CANCEL] FIM - duracao: ' + duracao + 'ms | resultado: ' + (resultado.sucesso ? 'SUCESSO' : 'FALHA'));
+    console.log('=============================================================');
 
     res.json(resultado);
   } catch (err) {
-    console.error('[NFSE-CANCEL] Erro:', err.message);
+    console.error('[NFSE-CANCEL] ERRO FATAL:', err.stack || err.message);
     res.status(500).json({ sucesso: false, erro: err.message });
   }
 });

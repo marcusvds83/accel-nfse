@@ -43,18 +43,23 @@ function gzipBase64(str) {
  */
 async function cancelarNfse(params) {
   const { nNFSe, nDFSe, cnpjPrest, justificativa, infNfseId } = params;
+  console.log('[NFSE-CANCEL-SVC] cancelarNfse chamado | chaveAcesso=' + (params.chaveAcesso || '(vazio)') + ' | nNFSe=' + (nNFSe || 'n/a') + ' | cnpjPrest=' + (cnpjPrest || 'n/a'));
 
   const cert = await carregarCertificado();
   if (!cert || (!cert.pfx && !cert.privateKeyPem)) {
+    console.log('[NFSE-CANCEL-SVC] ERRO: Certificado A1 nao disponivel');
     return { sucesso: false, cStat: 0, xMotivo: 'Certificado A1 nao disponivel' };
   }
+  console.log('[NFSE-CANCEL-SVC] Certificado carregado com sucesso');
 
   // Se temos a chave de acesso, usamos a API de eventos
   if (params.chaveAcesso) {
+    console.log('[NFSE-CANCEL-SVC] Chave de acesso presente, usando API de eventos...');
     return cancelarViaEvento(params, cert);
   }
 
   // Fallback: sem chave de acesso, nao e possivel cancelar via nova API
+  console.log('[NFSE-CANCEL-SVC] BLOQUEADO: Sem chave de acesso, nao e possivel cancelar');
   return {
     sucesso: false,
     cStat: 0,
@@ -66,6 +71,8 @@ async function cancelarViaEvento(params, cert) {
   const { chaveAcesso, justificativa } = params;
   const baseUrl = config.nfse.tp_amb === 1 ? config.sefin.producao : config.sefin.homologacao;
   const url = baseUrl + '/nfse/' + chaveAcesso + '/eventos';
+  console.log('[NFSE-CANCEL-SVC] URL do evento: ' + url);
+  console.log('[NFSE-CANCEL-SVC] Ambiente: ' + (config.nfse.tp_amb === 1 ? 'PRODUCAO' : 'HOMOLOGACAO'));
 
   const dhEvento = new Date().toISOString().replace(/\./, ',').replace(/Z$/, '-03:00');
   const nSeqEvento = 1;
@@ -86,14 +93,19 @@ async function cancelarViaEvento(params, cert) {
     '</detEvento>' +
     '</infEvento>' +
     '</EventoNfse>';
+  console.log('[NFSE-CANCEL-SVC] XML do evento gerado (' + eventoXml.length + ' bytes)');
 
   try {
+    console.log('[NFSE-CANCEL-SVC] Assinando XML do evento...');
     const assinado = await assinarXml(eventoXml, {
       privateKeyPem: cert.privateKeyPem,
       certPem: cert.certPem,
     });
+    console.log('[NFSE-CANCEL-SVC] XML assinado (' + assinado.length + ' bytes)');
 
+    console.log('[NFSE-CANCEL-SVC] Comprimindo (gzip+base64)...');
     const eventoGzipB64 = await gzipBase64(assinado);
+    console.log('[NFSE-CANCEL-SVC] Enviando POST para SEFIN... (gzipB64 length=' + eventoGzipB64.length + ')');
 
     const body = { pedidoRegistroEventoXmlGZipB64: eventoGzipB64 };
 
@@ -106,13 +118,18 @@ async function cancelarViaEvento(params, cert) {
       transformResponse: [data => data],
     });
 
+    console.log('[NFSE-CANCEL-SVC] Resposta HTTP: ' + response.status + ' ' + response.statusText);
+
     let respJson = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+    console.log('[NFSE-CANCEL-SVC] Resposta SEFIN: ' + JSON.stringify(respJson).substring(0, 500));
 
     if (respJson.erros && respJson.erros.length > 0) {
       const msg = respJson.erros.map(e => (e.codigo || '') + ' ' + (e.descricao || e.mensagem || '')).join('; ');
+      console.log('[NFSE-CANCEL-SVC] ERRO retornado pela SEFIN: ' + msg);
       return { sucesso: false, cStat: 0, xMotivo: msg };
     }
 
+    console.log('[NFSE-CANCEL-SVC] SUCESSO: Cancelamento registrado com sucesso na SEFIN');
     return {
       sucesso: true,
       cStat: 101,
@@ -123,6 +140,8 @@ async function cancelarViaEvento(params, cert) {
     const msg = err.response
       ? 'HTTP ' + err.response.status + ': ' + JSON.stringify(err.response.data || '').substring(0, 300)
       : err.message;
+    console.error('[NFSE-CANCEL-SVC] ERRO na comunicacao com SEFIN:', msg);
+    if (err.stack) console.error('[NFSE-CANCEL-SVC] Stack:', err.stack);
     return { sucesso: false, cStat: 0, xMotivo: msg };
   }
 }

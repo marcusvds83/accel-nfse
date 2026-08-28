@@ -17,25 +17,47 @@ const path = require('path');
 const fs = require('fs');
 
 // === Carrega logo como Buffer ===
+// Prioridade: 1) variavel de env NYTRO_LOGO_URL (Render), 2) ODOO_LOGO_URL (fallback), 3) arquivo local
 let LOGO_BUF = null;
-try {
-  const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
-  if (fs.existsSync(logoPath)) LOGO_BUF = fs.readFileSync(logoPath);
-} catch (_) {}
+let logoLoaded = false;
 
 async function ensureLogo() {
-  if (LOGO_BUF) return LOGO_BUF;
-  try {
-    const logoUrl = process.env.ODOO_LOGO_URL || '';
-    if (logoUrl) {
-      const resp = await fetch(logoUrl, { signal: AbortSignal.timeout(8000) });
+  if (logoLoaded) return LOGO_BUF;
+  logoLoaded = true; // evita tentativas repetidas
+
+  const logoUrl = process.env.NYTRO_LOGO_URL || process.env.ODOO_LOGO_URL || '';
+
+  // 1) Tenta baixar da URL (variavel de ambiente do Render)
+  if (logoUrl) {
+    try {
+      console.log('[NFSE-PDF] Tentando baixar logo da URL: ' + logoUrl);
+      const resp = await fetch(logoUrl, { signal: AbortSignal.timeout(10000) });
       if (resp.ok) {
         const arrayBuf = await resp.arrayBuffer();
         LOGO_BUF = Buffer.from(arrayBuf);
-        console.log('[NFSE-PDF] Logo baixada do Odoo: ' + LOGO_BUF.length + ' bytes');
+        console.log('[NFSE-PDF] Logo baixada com sucesso: ' + LOGO_BUF.length + ' bytes');
+        return LOGO_BUF;
+      } else {
+        console.warn('[NFSE-PDF] Falha ao baixar logo: HTTP ' + resp.status);
       }
+    } catch (e) {
+      console.warn('[NFSE-PDF] Erro ao baixar logo da URL: ' + e.message);
     }
-  } catch (_) {}
+  }
+
+  // 2) Fallback: arquivo local
+  try {
+    const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
+    if (fs.existsSync(logoPath)) {
+      LOGO_BUF = fs.readFileSync(logoPath);
+      console.log('[NFSE-PDF] Logo carregada do arquivo local: ' + LOGO_BUF.length + ' bytes');
+    } else {
+      console.warn('[NFSE-PDF] Arquivo local de logo nao encontrado: ' + logoPath);
+    }
+  } catch (e) {
+    console.warn('[NFSE-PDF] Erro ao carregar logo local: ' + e.message);
+  }
+
   return LOGO_BUF;
 }
 
