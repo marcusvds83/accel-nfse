@@ -1,31 +1,43 @@
 /**
  * services/nfse-signer.js — Assinatura digital XMLDSig (RSA-SHA256)
  * ================================================================
- * Assina o elemento <infDPS> do XML DPS no padrao SPED NFS-e v1.01.
+ * Assina elementos XML no padrao SPED NFS-e v1.01.
+ * Suporta tanto <infDPS> (emissao) quanto <infEvento> (cancelamento).
  * 
  * Algoritmos (conforme nfse-js, implementacao de referencia do SPED NFS-e Nacional):
  *   - Canonicalization: http://www.w3.org/TR/2001/REC-xml-c14n-20010315 (C14N 1.0)
  *   - Signature:       http://www.w3.org/2001/04/xmldsig-more#rsa-sha256
  *   - Digest:          http://www.w3.org/2001/04/xmlenc#sha256
  *   - Transform:       enveloped-signature + C14N 1.0
- * 
- * Usa xml-crypto (node-saml fork) para C14N e assinatura corretas.
  */
 
 const { SignedXml } = require('xml-crypto');
-const crypto = require('crypto');
 
 const NS_SPED = 'http://www.sped.fazenda.gov.br/nfse';
 
-// Algoritmos do perfil National NFS-e XMLDSig (conforme dmnelson/nfse-js)
 const ALG_C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
 const ALG_SIG = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
 const ALG_DIGEST = 'http://www.w3.org/2001/04/xmlenc#sha256';
 const ALG_ENVELOPED = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
 
 /**
- * Assina o XML DPS com XMLDSig (RSA-SHA256 + C14N 1.0).
- * @param {string} xmlString - XML DPS completo (sem assinatura)
+ * Detecta automaticamente o tipo de XML e retorna o nome do elemento raiz
+ * e o nome do elemento a assinar.
+ */
+function detectarTipoXml(xmlString) {
+  if (xmlString.includes('<infDPS')) {
+    return { raiz: 'DPS', info: 'infDPS' };
+  }
+  if (xmlString.includes('<infEvento')) {
+    return { raiz: 'EventoNfse', info: 'infEvento' };
+  }
+  throw new Error('Elemento infDPS ou infEvento nao encontrado no XML.');
+}
+
+/**
+ * Assina XML com XMLDSig (RSA-SHA256 + C14N 1.0).
+ * Detecta automaticamente se e DPS ou Evento de cancelamento.
+ * @param {string} xmlString - XML completo (sem assinatura)
  * @param {object} cert - { privateKeyPem, certPem }
  * @returns {string} XML assinado
  */
@@ -35,15 +47,18 @@ async function assinarXml(xmlString, cert) {
     throw new Error('Certificado ou chave privada nao disponivel para assinatura.');
   }
 
-  // Extrai o Id do infDPS para referenciar na assinatura
-  const idMatch = xmlString.match(/<infDPS Id="([^"]+)"/);
-  if (!idMatch) {
-    throw new Error('Elemento infDPS nao encontrado no XML DPS.');
-  }
-  const infDpsId = idMatch[1];
-  console.log('[NFSE-SIGNER] Assinando infDPS Id=' + infDpsId);
+  const tipo = detectarTipoXml(xmlString);
+  console.log('[NFSE-SIGNER] Tipo detectado: ' + tipo.raiz + '/' + tipo.info);
 
-  // Cria o signador xml-crypto com perfil National NFS-e
+  // Extrai o Id do elemento info
+  const idMatch = xmlString.match(new RegExp('<' + tipo.info + ' Id="([^"]+)"'));
+  if (!idMatch) {
+    throw new Error('Elemento ' + tipo.info + ' sem Id no XML.');
+  }
+  const infoId = idMatch[1];
+  console.log('[NFSE-SIGNER] Assinando ' + tipo.info + ' Id=' + infoId);
+
+  // Cria o signador
   const sig = new SignedXml({
     privateKey: privateKeyPem,
     publicCert: certPem,
@@ -51,14 +66,15 @@ async function assinarXml(xmlString, cert) {
     canonicalizationAlgorithm: ALG_C14N,
   });
 
-  // Adiciona referencia ao infDPS com transforms
+  // XPath para o elemento info dentro do raiz
+  const xpath = "/*[local-name()='" + tipo.raiz + "' and namespace-uri()='" + NS_SPED + "']/*[local-name()='" + tipo.info + "' and namespace-uri()='" + NS_SPED + "']";
+
   sig.addReference({
-    xpath: "/*[local-name()='DPS' and namespace-uri()='" + NS_SPED + "']/*[local-name()='infDPS' and namespace-uri()='" + NS_SPED + "']",
+    xpath: xpath,
     transforms: [ALG_ENVELOPED, ALG_C14N],
     digestAlgorithm: ALG_DIGEST,
   });
 
-  // Adiciona informacao do certificado (X509Data)
   sig.keyInfoProvider = {
     getKeyInfo: () => {
       const certB64 = certPem
@@ -69,7 +85,6 @@ async function assinarXml(xmlString, cert) {
     },
   };
 
-  // Calcula a assinatura
   sig.computeSignature(xmlString);
   const xmlAssinado = sig.getSignedXml();
 
