@@ -209,15 +209,31 @@ async function odooWrite(moveId, data) {
 }
 
 // === Re-anexar XML/PDF a NF ja emitida ===
+// Aceita move_id (Odoo internal ID) OU nfse_numero (numero da NFS-e como 91)
 router.post('/re-attach', apiKeyAuth, async (req, res) => {
   try {
-    const { move_id, chave_acesso } = req.body;
-    if (!move_id) return res.status(400).json({ erro: 'move_id obrigatorio' });
-
-    console.log('[NFSE-RE-ATTACH] move_id=' + move_id);
+    let { move_id, nfse_numero, chave_acesso } = req.body;
 
     const uid = await odooAuthenticate();
     const client = odooClient();
+
+    // Se nao tem move_id, busca pelo numero da NFS-e
+    if (!move_id && nfse_numero) {
+      console.log('[NFSE-RE-ATTACH] Buscando por nfse_numero=' + nfse_numero);
+      const ids = await new Promise((resolve, reject) => {
+        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'account.move', 'search', [
+          [['x_nytro_nfse_numero', '=', String(nfse_numero)]]
+        ]], (err, ids) => err ? reject(err) : resolve(ids));
+      });
+      if (!ids || !ids.length) {
+        return res.status(404).json({ erro: 'Nenhuma fatura encontrada com x_nytro_nfse_numero=' + nfse_numero });
+      }
+      move_id = ids[0];
+      console.log('[NFSE-RE-ATTACH] Encontrado move_id=' + move_id);
+    }
+
+    if (!move_id) return res.status(400).json({ erro: 'move_id ou nfse_numero obrigatorio' });
+    console.log('[NFSE-RE-ATTACH] move_id=' + move_id);
 
     // 1. Le a fatura
     const moves = await new Promise((resolve, reject) => {
@@ -226,7 +242,7 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       }], (err, result) => err ? reject(err) : resolve(result));
     });
 
-    if (!moves || !moves.length) return res.status(404).json({ erro: 'Fatura nao encontrada' });
+    if (!moves || !moves.length) return res.status(404).json({ erro: 'Fatura nao encontrada com move_id=' + move_id });
     const move = moves[0];
     console.log('[NFSE-RE-ATTACH] Fatura: ' + move.name + ' Status: ' + move.x_nytro_nfse_status);
 
