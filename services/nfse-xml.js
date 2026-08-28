@@ -181,6 +181,8 @@ function gerarXmlDPS(dados) {
   if (!xDescServ) {
     xDescServ = 'Servico prestado conforme contrato';
   }
+  // Remove tags HTML da descricao (narration do Odoo pode conter HTML)
+  xDescServ = xDescServ.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   if (xDescServ.length > 2000) xDescServ = xDescServ.substring(0, 2000);
 
   console.log('[NFSE-XML] xDescServ=' + xDescServ.substring(0, 80) + (xDescServ.length > 80 ? '...' : ''));
@@ -189,8 +191,11 @@ function gerarXmlDPS(dados) {
   // Ordem XSD: vServPrest, [vDescCondIncond], [vDedRed], trib
   // TCVServPrest: [vReceb], vServ
   // TCInfoTributacao: tribMun, [tribFed], totTrib
+  // TCTribMunicipal: tribISSQN, [cPaisResult], [tpImunidade], [exigSusp], [BM], tpRetISSQN, [pAliq]
+  // TCTribTotal (choice): vTotTrib | pTotTrib | indTotTrib | pTotTribSN
   const vServ = fmtValor(move.amount_untaxed || move.amount_total);
-  const issRetido = firstProduct.x_nytro_iss_retido !== false ? '1' : '2';
+  // tpRetISSQN: 1=Nao Retido, 2=Retido pelo Tomador, 3=Retido pelo Intermediario
+  const tpRetISSQN = firstProduct.x_nytro_iss_retido === true ? '2' : '1';
   const pTotTribSN = fmtValor(c.p_tot_trib_sn);
 
   // --- Monta o XML conforme XSD ---
@@ -236,13 +241,10 @@ function gerarXmlDPS(dados) {
       <trib>
         <tribMun>
           <tribISSQN>1</tribISSQN>
+          <tpRetISSQN>${tpRetISSQN}</tpRetISSQN>
         </tribMun>
         <totTrib>
-          <pTotTrib>
-            <pTotTribFed>${fmtValor(0)}</pTotTribFed>
-            <pTotTribEst>${fmtValor(0)}</pTotTribEst>
-            <pTotTribMun>${pTotTribSN}</pTotTribMun>
-          </pTotTrib>
+          <pTotTribSN>${pTotTribSN}</pTotTribSN>
         </totTrib>
       </trib>
     </valores>
