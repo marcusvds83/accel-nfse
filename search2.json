@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-emissor-publico-api-sistema-nacional-nfs-e-v1-2-out2025.pdf",
+    "name": "[PDF] Sistema Nacional NFS-e Guia para utilização das API´s do Emissor",
+    "snippet": "Oct 2, 2025 · Geração síncrona de Nota Fiscal de Serviço eletrônica. Através de um método POST a API recepciona uma DPS emitida pelo contribuinte e enviada ...",
+    "host_name": "www.gov.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.nfse.gov.br/emissornacional",
+    "name": "NFS-e | Portal Contribuinte - nfse.gov.br",
+    "snippet": "NFS-e | Portal Contribuinte. GovBR é um serviço online de identificação e autenticação digital. NFS-e - Contribuinte",
+    "host_name": "www.nfse.gov.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://suporte.smarapd.com.br/nfe",
+    "name": "Web Service de NFS-e (SMAR) - Portal de Chamados",
+    "snippet": "Uma plataforma online intuitiva para emissão e gestão das suas NFS-e, acessível de qualquer navegador. Portal Nacional NFSe: https://www.nfse.gov.br/ ...",
+    "host_name": "suporte.smarapd.com.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://atendimento.tecnospeed.com.br/hc/pt-br/articles/38360053945367-Documenta%C3%A7%C3%A3o-T%C3%A9cnica-Padr%C3%A3o-NFS-e-Nacional",
+    "name": "Documentação Técnica - Padrão NFS-e Nacional",
+    "snippet": "Jul 29, 2026 · Esta documentação existe para explicar as regras e os recursos do padrão NFS-e Nacional (SNNFSe) que seguimos na emissão integrada via ...",
+    "host_name": "atendimento.tecnospeed.com.br",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/brdev/comments/1nuecoe/nfse_emissor_nacional_api_de_produ%C3%A7%C3%A3o_danfse_501",
+    "name": "NFS-e Emissor Nacional - API de Produção - /danfse/ - 501 movido",
+    "snippet": "Sep 30, 2025 · Repentinamente, acredito que a partir do dia 25/09/2025, obter o pdf do danfse de uma nfs-e emitida em produção passou a retornar ERRO 501 - ...",
+    "host_name": "www.reddit.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

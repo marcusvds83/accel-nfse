@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/apis-prod-restrita-e-producao",
+    "name": "APIs - Prod. Restrita e Produção - Portal Gov.br",
+    "snippet": "APIs - Prod. Restrita e Produção ; PRODUÇÃO RESTRITA (homologação/testes). PRODUÇÃO ; CNC. https://adn.producaorestrita.nfse.gov.br/cnc/docs/index.html · https:// ...",
+    "host_name": "www.gov.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-emissor-publico-api-sistema-nacional-nfs-e-v1-2-out2025.pdf",
+    "name": "[PDF] Sistema Nacional NFS-e Guia para utilização das API´s do Emissor",
+    "snippet": "Oct 2, 2025 · Link ambiente de produção restrita: https://adn.producaorestrita.nfse.gov.br/contribuintes/docs/index.html",
+    "host_name": "www.gov.br",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.gov.br/nfse/pt-br/municipios/produtos-disponiveis/api-de-integracao",
+    "name": "API de integração — Portal da Nota Fiscal de Serviço eletrônica",
+    "snippet": "Jul 22, 2022 · As APIs fazem a comunicação entre o ambiente de dados dos municípios, das empresas e dos entes conveniados com o Ambiente de Dados Nacional (ADN) ...",
+    "host_name": "www.gov.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.gov.br/nfse/pt-br/noticias/disponibilizada-nova-versao-da-plataforma-nfs-e-em-producao-restrita-testes-1",
+    "name": "Disponibilizada nova versão da plataforma NFS-e em Produção",
+    "snippet": "Sep 9, 2025 · Importante informar que as atualizações, por ora, ficarão disponíveis apenas no ambiente de Produção Restrita por um período de 15 dias. A ideia ...",
+    "host_name": "www.gov.br",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.gov.br/nfse/pt-br/municipios/como-implementar-a-nfs-e-1/implementacao-da-nfs-e-adn",
+    "name": "Implementação da NFS-e - ADN - Portal Gov.br",
+    "snippet": "Jul 25, 2022 · Resumo do passo a passo para a implementação do ADN. Mais informações podem ser obtidas no Protocolo de Adesão no seguinte link: https://www.gov ...",
+    "host_name": "www.gov.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,47 @@
+[
+  {
+    "url": "CAESkwEB6zswFdWT9zJZJlibKyxyHvXkyjSwa8QDokdQdul9XxkuUIqdYWaOFUg5q5gYmsk7KkL30aRTX-TqHXGGKY_ZQJUp2VdULL2cZOKsXO1IVGR_6ZBwlY58d6QafhhHAI9Eil-s47_v_CrA4up59f0B9tkZGYhr3EnYg95gyoRG0JN-ez7sTyuFDAopyUpWXnFM4KA",
+    "name": "APIs - Prod. Restrita e Produção - Portal Gov.br",
+    "snippet": "Biblioteca Documentação técnica APIs - Prod. Restrita e Produção Info APIs - Prod. RESTRITA (homologação/testes) NFS-e WEB Consultar Nota Fiscal Acesso aos ...",
+    "host_name": "",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "CAEScgHrOzAV13_ThA8zm0nsWQhpGzLZ3EE0MOTm76nJQAvEcdTluVOzxuJlr2L5l0bDw1Nt62usb0mbZa3Q0itLdV2F_kuAp8I3dEJTzPPO0_1YI4cLdDVCuCrhjUU285gulc9amIONAGHGupctk0fwdalA-A",
+    "name": "Web Services",
+    "snippet": "Web Services ; Address: http://nfse1.publica.inf.br:80/irani_nfse_integracao/Services ; WSDL: http://nfse1.publica.inf.br:80/irani_nfse_integracao/Services?wsdl.",
+    "host_name": "",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "CAEShwEB6zswFSz0L4WJ7AGNe393r4lgbMyz2IIsGN4RoPEr77ql6bHBhX5x-jb6Tm86d8dpkgGyszyKx0Iw2LMFYwN_NgkIYmKcXbCqNGIVwGM81LVhOS8ffSFmAUaErXH6WxbYJ7LxjX0vSwq9qGu8ZtiB01gYx7t4EMEL-Ukt3Ia8v67kdcuGiio",
+    "name": "[XML] https://grp.saofranciscodepaula.rs.gov",
+    "snippet": ".gov.br/nfse/services/NFSEcancelamento?wsdl. Serviço destinado ao cancelamento de notas fiscais. a.rs.gov.br/nfse/services/NFSEcancelamento. ...",
+    "host_name": "",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "CAESWwHrOzAVlts1Oc72BPxmzPdZx3xOha6pYWc5mfC6sOqwS5VF1wbQDdYOiiZFA_LVdS5ppV2_HlyueU4IHyyCV03iRvtHrm8DAC8m0AitDVHOmOuXPeZwRYk8o9s",
+    "name": "Web Service de NFS-e (SMAR) - Portal de Chamados",
+    "snippet": "Uma plataforma online intuitiva para emissão e gestão das suas NFS-e, acessível de qualquer navegador. Portal Nacional NFSe: https://www.nfse.gov.br/ ...",
+    "host_name": "",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "CAEShQEB6zswFdnMa7Cf8KOoWxHmyUYZSSyq-APse7pLueFHUeXZPtlE_a5Y6-WAaAJUfYXFWBiK1krpHng_LhhiN1bhq75F95ZUa9Tjvbfbwye5l3hf9XpVEYr_Avsrs12aDSI4eAYSgGlF0FNe4FHXLL7eGmAK75BXyS-cDfvrqJsX_4DHyJbN",
+    "name": "[XML] https://nfs-e.quatis.rj.gov.br",
+    "snippet": "> <wsdl:definitions targetNamespace=\"https://nfs-e.quatis.rj.gov.br/ver20240921/webservices ... service name=\"NFEServicesService\"> <wsdl:port binding=\"impl ...",
+    "host_name": "",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

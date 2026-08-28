@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-emissor-publico-api-sistema-nacional-nfs-e-v1-2-out2025.pdf",
+    "name": "Sistema Nacional NFS-e Guia para utilização das API´s do",
+    "snippet": "Oct 2, 2025 — Através de um método POST a API recepciona uma DPS emitida pelo contribuinte e enviada pelo solicitante do serviço. A API realiza validações de ... Read more 6 pages",
+    "host_name": "www.gov.br",
+    "rank": 0,
+    "date": "Oct 2, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/brdev/comments/1nuecoe/nfse_emissor_nacional_api_de_produ%C3%A7%C3%A3o_danfse_501/?tl=en",
+    "name": "NFS-e National Issuer - Production API - /danfse",
+    "snippet": "Hey guys! Suddenly, I think starting on 09/25/2025, getting the PDF of the danfse from an NFS-e issued in production started returning ERROR ...",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/apis-prod-restrita-e-producao",
+    "name": "APIs - Prod. Restrita e Produção - Portal Gov.br",
+    "snippet": "APIs - Prod. Restrita e Produção ; ADN · https:// adn . producaorestrita . nfse . gov . br /municipios/docs/index.html · https://adn. nfse .gov.br/municipios/docs/index.html. Read more",
+    "host_name": "www.gov.br",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ndd.tech/fiscal-blog/nfs-e-nacional-liberacao-de-apis-de-producao-e-atualizacoes-da-documentacao-tecnica",
+    "name": "NFS-e Nacional: Liberação de APIs de Produção",
+    "snippet": "APIs de produção da NFS-e liberadas ! Conheça as atualizações técnicas, documentação completa e preparação para a Reforma Tributária do Consumo.",
+    "host_name": "ndd.tech",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.nfse.gov.br/emissornacional",
+    "name": "NFS-e | Portal Contribuinte",
+    "snippet": "Portal de Gestão NFS-e - Contribuinte · Acesso com Usuário/Senha · Acesso com Certificado Digital · Acesso via GOVBR . Read more",
+    "host_name": "www.nfse.gov.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

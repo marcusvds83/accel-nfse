@@ -246,8 +246,7 @@ async function gerarXmlDPS(dados) {
     <tpEmit>1</tpEmit>
     <cLocEmi>${ibge}</cLocEmi>
     <prest>
-      <CNPJ>${cnpjPrest}</CNPJ>
-      <xNome>${escXml(company.name)}</xNome>${endPrestXml}${fonePrestXml}${emailPrestXml}
+      <CNPJ>${cnpjPrest}</CNPJ>${endPrestXml}${fonePrestXml}${emailPrestXml}
       <regTrib>
         <opSimpNac>${c.op_simp_nac}</opSimpNac>
         <regApTribSN>${c.reg_ap_trib_sn}</regApTribSN>

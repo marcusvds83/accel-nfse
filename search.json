@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/apis-prod-restrita-e-producao",
+    "name": "APIs - Prod. Restrita e Produção - Portal Gov.br",
+    "snippet": "RESTRITA ( homologação /testes) NFS - e WEB Consultar Nota Fiscal Acesso aos Sistemas Consultar Nota Fiscal Prestador de Serviços Município",
+    "host_name": "www.gov.br",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://nfse.cabofrio.rj.gov.br/ver20240921/tmp/PortalServices/202508181841210576202012041209510167Manual_De_Integracao_2_02.pdf",
+    "name": "Web Service - NFS-e compartilhamento ao Ambiente de",
+    "snippet": "Dec 1, 2025 — Para iniciar o processo de homologação , o prestador deve realizar o credenciamento online para acesso e consumo do Web Service , disponível no ... 22 pages",
+    "host_name": "nfse.cabofrio.rj.gov.br",
+    "rank": 1,
+    "date": "Dec 1, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://atendimento.tecnospeed.com.br/hc/pt-br/articles/38360053945367-Documenta%C3%A7%C3%A3o-T%C3%A9cnica-Padr%C3%A3o-NFS-e-Nacional",
+    "name": "Documentação Técnica - Padrão NFS-e Nacional",
+    "snippet": "Jul 29, 2026 — Esta documentação existe para explicar as regras e os recursos do padrão NFS - e Nacional (SNNFSe) NFS - e via web service … homologação /liberação ...",
+    "host_name": "atendimento.tecnospeed.com.br",
+    "rank": 2,
+    "date": "Jul 29, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://documenter.getpostman.com/view/4035825/2sA35D43Ai",
+    "name": "Documentação API NFS-e Contass",
+    "snippet": "Apr 2, 2024 — Esta API fornece serviços para interação com um sistema de emissão de notas fiscais de serviço eletrônicas ( NFSe ). O Web Service e todos os seus ...",
+    "host_name": "documenter.getpostman.com",
+    "rank": 3,
+    "date": "Apr 2, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://humaita.tributariomunicipal.com.br/portalPrefeitura/template/humaita/docs/WebServiceNFSe-humaita.pdf",
+    "name": "Manual do Web Service NFS-e - Sistema Tributário Municipal",
+    "snippet": "Objetivo Permitir que as partes interessadas (Analistas, Usuários e Clientes), possam conhecer o funcionamento do Web Service que trata da recepção e ... 15 pages",
+    "host_name": "humaita.tributariomunicipal.com.br",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]
