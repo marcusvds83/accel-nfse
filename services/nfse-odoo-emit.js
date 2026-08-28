@@ -119,7 +119,7 @@ async function processPendingEmissions() {
     const moveIds = await executeKw(client, db, uid, 'account.move', 'search', [[
       ['move_type', '=', 'out_invoice'],
       ['state', '=', 'posted'],
-      ['x_nytro_nfse_status', '=', 'pendente'],
+      ['x_nytro_nfse_status', 'in', ['pendente', 'processando']],
     ]]);
 
     if (!moveIds || !moveIds.length) return { processed: 0 };
