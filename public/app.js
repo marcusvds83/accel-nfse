@@ -1,5 +1,5 @@
 /**
- * NFS-e Nytro Dashboard — Frontend App
+ * Nytro Fiscal Cloud — Frontend App
  * ======================================
  */
 
