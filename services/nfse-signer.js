@@ -28,10 +28,13 @@ function detectarTipoXml(xmlString) {
   if (xmlString.includes('<infDPS')) {
     return { raiz: 'DPS', info: 'infDPS' };
   }
+  if (xmlString.includes('<infPedReg')) {
+    return { raiz: 'pedRegEvento', info: 'infPedReg' };
+  }
   if (xmlString.includes('<infEvento')) {
     return { raiz: 'EventoNfse', info: 'infEvento' };
   }
-  throw new Error('Elemento infDPS ou infEvento nao encontrado no XML.');
+  throw new Error('Elemento infDPS, infPedReg ou infEvento nao encontrado no XML.');
 }
 
 /**

@@ -2,7 +2,8 @@
  * services/nfse-cancelamento.js — Cancelamento de NFS-e (SEFIN REST)
  * =================================================================
  * Desde 01/10/2025, cancelamento via API REST (evento 101101).
- * Envia pedido de cancelamento como evento na API SEFIN.
+ * Envia pedido de cancelamento como pedRegEvento na API SEFIN.
+ * Schema: v1.01 — raiz <pedRegEvento>, info <infPedReg>, evento <e101101>
  */
 
 const config = require('../config');
@@ -33,6 +34,26 @@ function gzipBase64(str) {
       resolve(compressed.toString('base64'));
     });
   });
+}
+
+/**
+ * Formata data/hora no formato ISO 8601 com timezone (-03:00), sem milissegundos.
+ * Ex: 2026-08-31T14:35:50-03:00
+ */
+function formatDhEvento() {
+  const now = new Date();
+  const offset = -3; // BRT
+  const local = new Date(now.getTime() + offset * 60 * 60 * 1000);
+  const yyyy = local.getFullYear();
+  const mm = String(local.getMonth() + 1).padStart(2, '0');
+  const dd = String(local.getDate()).padStart(2, '0');
+  const hh = String(local.getHours()).padStart(2, '0');
+  const mi = String(local.getMinutes()).padStart(2, '0');
+  const ss = String(local.getSeconds()).padStart(2, '0');
+  const tzSign = offset >= 0 ? '+' : '-';
+  const tzH = String(Math.abs(offset)).padStart(2, '0');
+  const tzM = '00';
+  return yyyy + '-' + mm + '-' + dd + 'T' + hh + ':' + mi + ':' + ss + tzSign + tzH + ':' + tzM;
 }
 
 /**
@@ -68,35 +89,54 @@ async function cancelarNfse(params) {
 }
 
 async function cancelarViaEvento(params, cert) {
-  const { chaveAcesso, justificativa } = params;
+  const { chaveAcesso, justificativa, cnpjPrest } = params;
   const baseUrl = config.nfse.tp_amb === 1 ? config.sefin.producao : config.sefin.homologacao;
   const url = baseUrl + '/nfse/' + chaveAcesso + '/eventos';
   console.log('[NFSE-CANCEL-SVC] URL do evento: ' + url);
   console.log('[NFSE-CANCEL-SVC] Ambiente: ' + (config.nfse.tp_amb === 1 ? 'PRODUCAO' : 'HOMOLOGACAO'));
 
-  const dhEvento = new Date().toISOString().replace(/\./, ',').replace(/Z$/, '-03:00');
-  const nSeqEvento = 1;
+  const dhEvento = formatDhEvento();
+  const tpAmb = String(config.nfse.tp_amb);
+  const verAplic = config.nfse.ver_aplic || 'nfse-nytro_1.0.0';
 
-  // Gera XML do pedido de cancelamento (Evento 101101)
+  // CNPJ do prestador/autor (apenas digitos)
+  const cnpjAutor = (cnpjPrest || '').replace(/[^0-9]/g, '');
+  if (!cnpjAutor || cnpjAutor.length !== 14) {
+    console.log('[NFSE-CANCEL-SVC] ERRO: CNPJ do prestador invalido: ' + cnpjAutor);
+    return { sucesso: false, cStat: 0, xMotivo: 'CNPJ do prestador invalido (' + cnpjAutor + ')' };
+  }
+
+  // xMotivo: garantir minimo 15 caracteres (XSD exige minLength=15)
+  let xMotivo = justificativa || 'Cancelamento solicitado pelo emitente';
+  if (xMotivo.length < 15) xMotivo = xMotivo + ' - verifique os dados';
+  if (xMotivo.length > 255) xMotivo = xMotivo.substring(0, 255);
+
+  // infPedReg Id: "PRE" + chave(50 digitos) + tpEvento(6 digitos) = 59 chars
+  const tpEvento = '101101';
+  const infPedRegId = 'PRE' + chaveAcesso + tpEvento;
+  console.log('[NFSE-CANCEL-SVC] infPedReg Id: ' + infPedRegId + ' (' + infPedRegId.length + ' chars)');
+
+  // === Gera XML pedRegEvento v1.01 ===
   const eventoXml =
     '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<EventoNfse xmlns="' + NS + '" versao="1.01">' +
-    '<infEvento Id="' + chaveAcesso + '101101' + nSeqEvento + '">' +
-    '<chaveAcesso>' + chaveAcesso + '</chaveAcesso>' +
-    '<tpEvento>101101</tpEvento>' +
-    '<nSeqEvento>' + nSeqEvento + '</nSeqEvento>' +
+    '<pedRegEvento xmlns="' + NS + '" versao="1.01">' +
+    '<infPedReg Id="' + infPedRegId + '">' +
+    '<tpAmb>' + tpAmb + '</tpAmb>' +
+    '<verAplic>' + verAplic + '</verAplic>' +
     '<dhEvento>' + dhEvento + '</dhEvento>' +
-    '<detEvento>' +
-    '<evCancNfse>' +
-    '<xJust>' + justificativa + '</xJust>' +
-    '</evCancNfse>' +
-    '</detEvento>' +
-    '</infEvento>' +
-    '</EventoNfse>';
-  console.log('[NFSE-CANCEL-SVC] XML do evento gerado (' + eventoXml.length + ' bytes)');
+    '<CNPJAutor>' + cnpjAutor + '</CNPJAutor>' +
+    '<chNFSe>' + chaveAcesso + '</chNFSe>' +
+    '<e101101>' +
+    '<xDesc>Cancelamento de NFS-e</xDesc>' +
+    '<cMotivo>9</cMotivo>' +
+    '<xMotivo>' + escapeXml(xMotivo) + '</xMotivo>' +
+    '</e101101>' +
+    '</infPedReg>' +
+    '</pedRegEvento>';
+  console.log('[NFSE-CANCEL-SVC] XML pedRegEvento gerado (' + eventoXml.length + ' bytes)');
 
   try {
-    console.log('[NFSE-CANCEL-SVC] Assinando XML do evento...');
+    console.log('[NFSE-CANCEL-SVC] Assinando XML (infPedReg)...');
     const assinado = await assinarXml(eventoXml, {
       privateKeyPem: cert.privateKeyPem,
       certPem: cert.certPem,
@@ -123,10 +163,25 @@ async function cancelarViaEvento(params, cert) {
     let respJson = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
     console.log('[NFSE-CANCEL-SVC] Resposta SEFIN: ' + JSON.stringify(respJson).substring(0, 500));
 
-    if (respJson.erros && respJson.erros.length > 0) {
-      const msg = respJson.erros.map(e => (e.codigo || '') + ' ' + (e.descricao || e.mensagem || '')).join('; ');
+    if (respJson.erro && respJson.erro.length > 0) {
+      const msg = respJson.erro.map(e => (e.codigo || '') + ' ' + (e.descricao || e.mensagem || '')).join('; ');
       console.log('[NFSE-CANCEL-SVC] ERRO retornado pela SEFIN: ' + msg);
       return { sucesso: false, cStat: 0, xMotivo: msg };
+    }
+
+    // Verifica se tem eventos retornados com erro
+    if (respJson.eventos && respJson.eventos.length > 0) {
+      const evt = respJson.eventos[0];
+      if (evt.infEvento && evt.infEvento.erro) {
+        const msg = evt.infEvento.erro.map(e => (e.codigo || '') + ' ' + (e.descricao || e.mensagem || '')).join('; ');
+        console.log('[NFSE-CANCEL-SVC] ERRO no evento: ' + msg);
+        return { sucesso: false, cStat: 0, xMotivo: msg };
+      }
+      // Sucesso no evento
+      const cStat = evt.infEvento && evt.infEvento.cStat ? evt.infEvento.cStat : '101';
+      const xMot = evt.infEvento && evt.infEvento.xMotivo ? evt.infEvento.xMotivo : 'Cancelamento registrado';
+      console.log('[NFSE-CANCEL-SVC] SUCESSO: ' + xMot);
+      return { sucesso: true, cStat: cStat, xMotivo: xMot, dados: respJson };
     }
 
     console.log('[NFSE-CANCEL-SVC] SUCESSO: Cancelamento registrado com sucesso na SEFIN');
@@ -144,6 +199,16 @@ async function cancelarViaEvento(params, cert) {
     if (err.stack) console.error('[NFSE-CANCEL-SVC] Stack:', err.stack);
     return { sucesso: false, cStat: 0, xMotivo: msg };
   }
+}
+
+/** Escapa caracteres especiais XML */
+function escapeXml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 module.exports = { cancelarNfse };

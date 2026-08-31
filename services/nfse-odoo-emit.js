@@ -544,8 +544,20 @@ async function processarCancelamentosSolicitados(client, db, uid) {
           }]);
           console.log('[NFSE-CANCEL-POLL] SUCESSO - Fatura ' + move.name + ' cancelada');
         } else {
-          await safeUpdateError(client, db, uid, moveId, 'Falha ao cancelar: ' + (resultado.xMotivo || 'Erro desconhecido'));
-          console.log('[NFSE-CANCEL-POLL] FALHA - ' + (resultado.xMotivo || ''));
+          // Falha no cancelamento: volta o status para 'autorizada' (nao marca como erro)
+          const motivo = resultado.xMotivo || 'Erro desconhecido';
+          console.log('[NFSE-CANCEL-POLL] FALHA - ' + motivo);
+          await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
+            x_nytro_nfse_status: 'autorizada',
+            x_nytro_nfse_erro: false,
+            x_nytro_nfse_mensagem: 'Falha ao cancelar: ' + motivo.substring(0, 500),
+          }]);
+          await executeKw(client, db, uid, 'mail.message', 'create', [{
+            model: 'account.move',
+            res_id: moveId,
+            body: '<b>Falha no Cancelamento da NFS-e</b><br/>A nota continua <b>autorizada</b>.<br/>Erro: ' + motivo.substring(0, 500),
+            message_type: 'comment',
+          }]);
         }
         console.log('=============================================================');
       } catch (e) {
