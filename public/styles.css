@@ -72,6 +72,7 @@ body {
 }
 
 .auth-logo { margin-bottom: 20px; }
+.auth-logo-img { height: 56px; width: auto; border-radius: 8px; }
 .auth-card h1 {
   font-size: 1.6rem;
   font-weight: 700;
@@ -141,6 +142,7 @@ body {
 
 .topbar-left { display: flex; align-items: center; gap: 14px; }
 .logo { display: flex; align-items: center; gap: 10px; }
+.topbar-logo-img { height: 28px; width: auto; border-radius: 6px; }
 .logo-text {
   font-size: 1.15rem;
   font-weight: 700;
