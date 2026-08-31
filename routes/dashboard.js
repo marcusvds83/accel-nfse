@@ -131,13 +131,18 @@ router.get('/dashboard', apiKeyAuth, async (req, res) => {
       partnerData.forEach(p => { partners[p.id] = p; });
     }
 
-    // Le dados da empresa
+    // Le dados da empresa (campos descobertos dinamicamente)
     const companyId = moves[0]?.company_id?.[0];
     let empresa = null;
     if (companyId) {
-      const empresas = await executeKw(client, db, uid, 'res.company', 'read', [[companyId]], {
-        fields: ['name', 'city', 'state_id', 'vat', 'cnpj_cpf', 'x_nytro_nfse_dados_prestador_im'],
-      });
+      const camposCompanyDesejados = ['name', 'city', 'state_id', 'vat', 'cnpj_cpf', 'company_registry', 'x_nytro_nfse_dados_prestador_im', 'x_nytro_nfse_numero'];
+      const ccExistentes = await executeKw(client, db, uid, 'ir.model.fields', 'search_read',
+        [[['model', '=', 'res.company'], ['name', 'in', camposCompanyDesejados]]],
+        { fields: ['name'] }
+      );
+      const ccSet = new Set(ccExistentes.map(f => f.name));
+      const ccValidos = camposCompanyDesejados.filter(c => ccSet.has(c));
+      const empresas = await executeKw(client, db, uid, 'res.company', 'read', [[companyId]], { fields: ccValidos });
       if (empresas.length) empresa = empresas[0];
     }
 
@@ -190,6 +195,7 @@ router.get('/dashboard', apiKeyAuth, async (req, res) => {
         nome: empresa.name,
         cidade: empresa.city || '',
         im: empresa.x_nytro_nfse_dados_prestador_im || config.nfse.inscricao_municipal,
+        ultimo_ndps: empresa.x_nytro_nfse_numero || 0,
       } : null,
       ambiente: config.nfse.tp_amb === 1 ? 'PRODUCAO' : 'HOMOLOGACAO',
       cidade: config.nfse.cidade,
