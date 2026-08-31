@@ -287,8 +287,13 @@ async function consultarDps(idDps, cert) {
 }
 
 /**
- * Baixa o PDF oficial do DANFSe da SEFIN.
- * Tenta multiplos padroes de URL ate encontrar o correto.
+ * Baixa o PDF oficial do DANFSe do portal nacional.
+ * O endpoint correto (desde out/2025) e o ADN (Ambiente de Danfse Nacional):
+ *   Producao:      https://adn.nfse.gov.br/danfse/{chaveAcesso}
+ *   Homologacao:   https://adn.producaorestrita.nfse.gov.br/danfse/{chaveAcesso}
+ * Requer mTLS com o certificado A1 do emitente.
+ * Nota: o gov tem restringido este endpoint por alto consumo (pode retornar 500).
+ *
  * @param {string} chaveAcesso - Chave de acesso da NFS-e (50 digitos)
  * @param {object} cert - Certificado A1 para mTLS
  * @returns {Promise<Buffer|null>} Buffer do PDF ou null se indisponivel
@@ -299,13 +304,16 @@ async function baixarPdfDanfse(chaveAcesso, cert) {
     return null;
   }
 
-  const baseUrl = getBaseUrl();
-  // Padroes de URL possiveis para o PDF do DANFSe (SPED NFS-e REST v1.01)
+  // URLs do ADN (Ambiente de Danfse Nacional) — endpoint oficial para PDF
+  const isProd = config.nfse.tp_amb === 1;
   const urlCandidates = [
-    baseUrl + '/nfse/' + chaveAcesso + '/documento',
-    baseUrl + '/nfse/' + chaveAcesso + '/pdf',
-    baseUrl + '/documento/' + chaveAcesso,
-    baseUrl + '/nfse/documento/' + chaveAcesso,
+    // ADN — endereco correto desde out/2025 (forum.casadodesenvolvedor.com.br)
+    isProd
+      ? 'https://adn.nfse.gov.br/danfse/' + chaveAcesso
+      : 'https://adn.producaorestrita.nfse.gov.br/danfse/' + chaveAcesso,
+    // URLs antigas/alternativas (fallback)
+    'https://sefin.nfse.gov.br/SefinNacional/danfse/' + chaveAcesso,
+    'https://sefin.nfse.gov.br/sefinnacional/danfse/' + chaveAcesso,
   ];
 
   const httpsAgent = createHttpsAgent(cert);
@@ -318,7 +326,7 @@ async function baixarPdfDanfse(chaveAcesso, cert) {
           'Accept': 'application/pdf, */*',
         },
         httpsAgent: httpsAgent || undefined,
-        timeout: 15000,
+        timeout: 20000,
         rejectUnauthorized: !config.tls_insecure,
         responseType: 'arraybuffer',
       });
@@ -328,12 +336,12 @@ async function baixarPdfDanfse(chaveAcesso, cert) {
 
       // Verifica se recebeu um PDF valido (comeca com %PDF-)
       if (buf.length > 100 && buf.slice(0, 5).toString('ascii').startsWith('%PDF-')) {
-        console.log('[NFSE-CLIENT-PDF] PDF oficial baixado com sucesso: ' + buf.length + ' bytes de ' + url);
+        console.log('[NFSE-CLIENT-PDF] PDF OFICIAL do gov.br baixado com sucesso: ' + buf.length + ' bytes de ' + url);
         return buf;
       }
 
-      // Se a resposta e JSON, pode ser um erro ou XML (nao PDF)
-      if (contentType.includes('application/json') || contentType.includes('application/xml')) {
+      // Se a resposta e JSON/XML, nao e PDF
+      if (contentType.includes('application/json') || contentType.includes('application/xml') || contentType.includes('text/html')) {
         console.log('[NFSE-CLIENT-PDF] Resposta nao e PDF (Content-Type: ' + contentType + '), tentando proxima URL...');
         continue;
       }
@@ -346,7 +354,7 @@ async function baixarPdfDanfse(chaveAcesso, cert) {
     }
   }
 
-  console.warn('[NFSE-CLIENT-PDF] Nenhuma URL de PDF retornou um PDF valido. O PDF sera gerado localmente como fallback.');
+  console.warn('[NFSE-CLIENT-PDF] Nenhuma URL retornou PDF oficial. O PDF sera gerado localmente (PDFKit) como fallback.');
   return null;
 }
 
