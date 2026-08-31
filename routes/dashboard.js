@@ -15,7 +15,7 @@ const config = require('../config');
 const xmlrpc = require('xmlrpc');
 const { carregarCertificado } = require('../services/firebase-cert');
 const { testarConexao, consultarNfse, baixarPdfDanfse } = require('../services/nfse-client');
-const { gerarPdfDanfse, gerarDanfseOpenNfse } = require('../services/nfse-pdf');
+const { gerarPdfDanfse } = require('../services/nfse-pdf');
 
 // === Auth ===
 function apiKeyAuth(req, res, next) {
@@ -346,28 +346,12 @@ router.get('/dashboard/:id/pdf', apiKeyAuth, async (req, res) => {
     const numNF = String(move.x_nytro_nfse_numero || moveId).padStart(6, '0');
     let pdfBuf = null;
 
-    // 1. Tenta PDF oficial do ADN
-    if (move.x_nytro_nfse_codigo_verificacao) {
-      try {
-        const cert = await carregarCertificado();
-        if (cert) {
-          pdfBuf = await baixarPdfDanfse(move.x_nytro_nfse_codigo_verificacao, cert);
-        }
-      } catch (_) {}
-    }
-
-    // 2. Gera DANFSe via open-nfse (padrao nacional, ESTRATEGIA PRINCIPAL)
-    if (!pdfBuf && xml) {
-      try {
-        pdfBuf = await gerarDanfseOpenNfse(xml);
-      } catch (_) {}
-    }
-
-    // 3. Fallback: gera PDF local (PDFKit Nytro)
-    if (!pdfBuf) {
-      if (!xml) return res.status(404).json({ erro: 'XML nao disponivel para gerar PDF local' });
+    // 1. Gera DANFSe localmente (PDFKit Nytro com logo)
+    if (!xml) return res.status(404).json({ erro: 'XML nao disponivel para gerar PDF' });
+    try {
       pdfBuf = await gerarPdfDanfse(xml);
-    }
+    } catch (_) {}
+    if (!pdfBuf) return res.status(500).json({ erro: 'Falha ao gerar PDF' });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="DANFSe-' + numNF + '.pdf"');

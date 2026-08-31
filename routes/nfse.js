@@ -12,7 +12,7 @@ const router = express.Router();
 const config = require('../config');
 const { processPendingEmissions } = require('../services/nfse-odoo-emit');
 const { cancelarNfse } = require('../services/nfse-cancelamento');
-const { gerarPdfDanfse, gerarDanfseOpenNfse } = require('../services/nfse-pdf');
+const { gerarPdfDanfse } = require('../services/nfse-pdf');
 const { carregarCertificado } = require('../services/firebase-cert');
 const { consultarNfse, baixarPdfDanfse } = require('../services/nfse-client');
 const xmlrpc = require('xmlrpc');
@@ -319,59 +319,21 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       console.error('[NFSE-RE-ATTACH] Falha XML:', e.message);
     }
 
-    // 4. Gera e upload PDF
-    // Estrategia: 1) PDF oficial ADN, 2) open-nfse, 3) PDFKit Nytro
+    // 4. Gera e upload PDF (PDFKit Nytro com logo)
     try {
       const pdfNome = 'DANFSe-' + String(numNF).padStart(6, '0') + '.pdf';
       let pdfBuf = null;
-      let pdfOrigem = '';
 
-      // 4a. Tenta PDF oficial do ADN
-      if (chave) {
-        console.log('[NFSE-RE-ATTACH] 4a. Tentando PDF oficial ADN (chave=' + chave + ')...');
-        try {
-          const cert = await carregarCertificado();
-          if (cert) {
-            pdfBuf = await baixarPdfDanfse(chave, cert);
-            if (pdfBuf) {
-              pdfOrigem = 'oficial_ADN';
-              console.log('[NFSE-RE-ATTACH] PDF oficial ADN obtido: ' + pdfBuf.length + ' bytes');
-            }
-          }
-        } catch (ePdf) {
-          console.warn('[NFSE-RE-ATTACH] PDF oficial ADN indisponivel: ' + ePdf.message);
-        }
+      // 4a. Gera DANFSe localmente (PDFKit Nytro)
+      console.log('[NFSE-RE-ATTACH] 4a. Gerando DANFSe (PDFKit Nytro com logo)...');
+      try {
+        pdfBuf = await gerarPdfDanfse(nfseXml);
+      } catch (eLocal) {
+        console.error('[NFSE-RE-ATTACH] FALHA ao gerar DANFSe: ' + eLocal.message);
       }
 
-      // 4b. Gera DANFSe via open-nfse (padrao nacional, ESTRATEGIA PRINCIPAL)
-      if (!pdfBuf) {
-        console.log('[NFSE-RE-ATTACH] 4b. Gerando DANFSe via open-nfse (padrao nacional)...');
-        try {
-          pdfBuf = await gerarDanfseOpenNfse(nfseXml);
-          if (pdfBuf) {
-            pdfOrigem = 'open-nfse';
-            console.log('[NFSE-RE-ATTACH] DANFSe open-nfse gerado: ' + pdfBuf.length + ' bytes');
-          }
-        } catch (eOpen) {
-          console.warn('[NFSE-RE-ATTACH] open-nfse falhou: ' + eOpen.message);
-        }
-      }
-
-      // 4c. Fallback: gera PDF local (PDFKit Nytro)
-      if (!pdfBuf) {
-        console.log('[NFSE-RE-ATTACH] 4c. Gerando PDF local (PDFKit Nytro)...');
-        try {
-          pdfBuf = await gerarPdfDanfse(nfseXml);
-          pdfOrigem = 'gerado_local';
-          console.log('[NFSE-RE-ATTACH] PDF local gerado: ' + pdfBuf.length + ' bytes');
-        } catch (eLocal) {
-          console.error('[NFSE-RE-ATTACH] FALHA ao gerar PDF local: ' + eLocal.message);
-        }
-      }
-
-      // 4d. Anexa o PDF
+      // 4b. Anexa o PDF
       if (pdfBuf && pdfBuf.length > 0) {
-        const origemLabel = pdfOrigem === 'oficial_ADN' ? 'PDF oficial ADN' : pdfOrigem === 'open-nfse' ? 'DANFSe Nacional' : 'PDF gerado';
         const pdfB64 = pdfBuf.toString('base64');
         const attachId = await new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
@@ -382,12 +344,12 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
         await new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
             model: 'account.move', res_id: move_id,
-            body: '<b>DANFSe ' + numNF + '</b> (' + origemLabel + ') - re-anexado',
+            body: '<b>DANFSe ' + numNF + '</b> - re-anexado',
             message_type: 'comment',
             attachment_ids: [[6, 0, [attachId]]],
           }]], (err, id) => err ? reject(err) : resolve(id));
         });
-        console.log('[NFSE-RE-ATTACH] PDF anexado: ' + pdfNome + ' (attach_id=' + attachId + ', origem=' + pdfOrigem + ')');
+        console.log('[NFSE-RE-ATTACH] PDF anexado: ' + pdfNome + ' (attach_id=' + attachId + ')');
       } else {
         console.error('[NFSE-RE-ATTACH] NENHUM PDF disponivel para anexar.');
       }

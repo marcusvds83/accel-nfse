@@ -67,4 +67,53 @@ router.get('/prefeitura/status', apiKeyAuth, async (req, res) => {
   }
 });
 
+// === Upload da logo Nytro para o Firebase ===
+// Persiste a logo entre deploys do Render.
+// Body: { logoBase64: '<base64 do PNG>' }
+router.post('/logo', apiKeyAuth, async (req, res) => {
+  try {
+    const { logoBase64 } = req.body;
+    if (!logoBase64) return res.status(400).json({ erro: 'logoBase64 obrigatorio' });
+
+    // Valida que e uma imagem valida
+    const buf = Buffer.from(logoBase64, 'base64');
+    if (buf.length < 100) return res.status(400).json({ erro: 'Logo muito pequena' });
+
+    // Inicializa Firebase
+    const admin = require('firebase-admin');
+    const config = require('../config');
+    if (admin.apps.length === 0) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: config.firebase.project_id,
+          privateKey: config.firebase.private_key,
+          clientEmail: config.firebase.client_email,
+        }),
+      });
+    }
+    const db = admin.firestore();
+    await db.collection(config.firebase.collection).doc('logo').set({
+      logoBase64: logoBase64,
+      tamanho: buf.length,
+      uploadEm: new Date().toISOString(),
+    });
+
+    // Invalida cache da logo no nfse-pdf.js
+    const nfsePdf = require('../services/nfse-pdf');
+    if (nfsePdf.ensureLogo) {
+      // Forca recarregamento na proxima geracao
+      const path = require('path');
+      const fs = require('fs');
+      const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
+      try { fs.writeFileSync(logoPath, buf); } catch (e) { /* ignore */ }
+    }
+
+    console.log('[CERT-LOGO] Logo salva no Firebase: ' + buf.length + ' bytes');
+    res.json({ sucesso: true, tamanho: buf.length, mensagem: 'Logo salva no Firebase e no arquivo local.' });
+  } catch (err) {
+    console.error('[CERT-LOGO] Erro:', err.message);
+    res.status(500).json({ erro: err.message });
+  }
+});
+
 module.exports = router;

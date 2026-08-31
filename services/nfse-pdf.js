@@ -16,20 +16,55 @@ const bwipjs = require('bwip-js');
 const path = require('path');
 const fs = require('fs');
 const config = require('../config');
-const { parseNfseXml, gerarDanfse, Ambiente } = require('open-nfse');
 
 // === Carrega logo como Buffer ===
-// Prioridade: 1) variavel de env NYTRO_LOGO_URL (Render), 2) ODOO_LOGO_URL (fallback), 3) arquivo local
+// Prioridade: 1) Arquivo local (deploy via git), 2) Firebase (persistente), 3) URL env var
 let LOGO_BUF = null;
 let logoLoaded = false;
 
+async function loadLogoFromFirebase() {
+  try {
+    const admin = require('firebase-admin');
+    if (admin.apps.length === 0) return null;
+    const db = admin.firestore();
+    const snap = await db.collection(config.firebase.collection).doc('logo').get();
+    if (!snap.exists || !snap.data().logoBase64) return null;
+    return Buffer.from(snap.data().logoBase64, 'base64');
+  } catch (e) {
+    return null;
+  }
+}
+
 async function ensureLogo() {
   if (logoLoaded) return LOGO_BUF;
-  logoLoaded = true; // evita tentativas repetidas
+  logoLoaded = true;
 
+  // 1) Arquivo local (assets/logo-nytro.png) — vem via git deploy
+  try {
+    const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
+    if (fs.existsSync(logoPath)) {
+      LOGO_BUF = fs.readFileSync(logoPath);
+      console.log('[NFSE-PDF] Logo carregada do arquivo local: ' + LOGO_BUF.length + ' bytes');
+      return LOGO_BUF;
+    }
+  } catch (e) {
+    console.warn('[NFSE-PDF] Erro ao carregar logo local: ' + e.message);
+  }
+
+  // 2) Firebase Firestore (persiste entre deploys)
+  try {
+    const fbLogo = await loadLogoFromFirebase();
+    if (fbLogo && fbLogo.length > 100) {
+      LOGO_BUF = fbLogo;
+      console.log('[NFSE-PDF] Logo carregada do Firebase: ' + LOGO_BUF.length + ' bytes');
+      return LOGO_BUF;
+    }
+  } catch (e) {
+    console.warn('[NFSE-PDF] Erro ao carregar logo do Firebase: ' + e.message);
+  }
+
+  // 3) URL (variavel de ambiente do Render)
   const logoUrl = process.env.NYTRO_LOGO_URL || process.env.ODOO_LOGO_URL || '';
-
-  // 1) Tenta baixar da URL (variavel de ambiente do Render)
   if (logoUrl) {
     try {
       console.log('[NFSE-PDF] Tentando baixar logo da URL: ' + logoUrl);
@@ -37,29 +72,15 @@ async function ensureLogo() {
       if (resp.ok) {
         const arrayBuf = await resp.arrayBuffer();
         LOGO_BUF = Buffer.from(arrayBuf);
-        console.log('[NFSE-PDF] Logo baixada com sucesso: ' + LOGO_BUF.length + ' bytes');
+        console.log('[NFSE-PDF] Logo baixada da URL: ' + LOGO_BUF.length + ' bytes');
         return LOGO_BUF;
-      } else {
-        console.warn('[NFSE-PDF] Falha ao baixar logo: HTTP ' + resp.status);
       }
     } catch (e) {
       console.warn('[NFSE-PDF] Erro ao baixar logo da URL: ' + e.message);
     }
   }
 
-  // 2) Fallback: arquivo local
-  try {
-    const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
-    if (fs.existsSync(logoPath)) {
-      LOGO_BUF = fs.readFileSync(logoPath);
-      console.log('[NFSE-PDF] Logo carregada do arquivo local: ' + LOGO_BUF.length + ' bytes');
-    } else {
-      console.warn('[NFSE-PDF] Arquivo local de logo nao encontrado: ' + logoPath);
-    }
-  } catch (e) {
-    console.warn('[NFSE-PDF] Erro ao carregar logo local: ' + e.message);
-  }
-
+  console.warn('[NFSE-PDF] Nenhuma logo encontrada (local, Firebase ou URL).');
   return LOGO_BUF;
 }
 
@@ -739,37 +760,4 @@ async function gerarPdfDanfse(nfseXml) {
   });
 }
 
-/**
- * Gera DANFSe usando a biblioteca open-nfse (PDFKit + QRCode)
- * Segue o padrao nacional com campos obrigatorios, QR Code para consulta
- * publica, suporte a IBS/CBS (Reforma Tributaria), etc.
- * Esta e a ESTRATEGIA PRINCIPAL desde que a API oficial DANFSe do ADN
- * foi suspensa em 03/08/2026 pela NT 008/2026 v1.02.
- *
- * @param {string} xmlNfse - XML completo da NFS-e (retornado pela SEFIN)
- * @returns {Promise<Buffer|null>} Buffer do PDF ou null em caso de erro
- */
-async function gerarDanfseOpenNfse(xmlNfse) {
-  try {
-    if (!xmlNfse || xmlNfse.length < 100) {
-      console.warn('[NFSE-PDF-OPENNFSE] XML vazio ou muito curto, nao e possivel gerar DANFSe.');
-      return null;
-    }
-    console.log('[NFSE-PDF-OPENNFSE] Parseando XML da NFS-e (' + xmlNfse.length + ' chars)...');
-    const nfse = parseNfseXml(xmlNfse);
-    console.log('[NFSE-PDF-OPENNFSE] XML parseado com sucesso. Chave: ' + (nfse.infNFSe?.chaveAcesso || 'n/a') + ', nNFSe: ' + (nfse.infNFSe?.nNFSe || 'n/a'));
-
-    const isProd = config.nfse.tp_amb === 1;
-    const pdfBuf = await gerarDanfse(nfse, {
-      ambiente: isProd ? Ambiente.Producao : Ambiente.ProducaoRestrita,
-    });
-    console.log('[NFSE-PDF-OPENNFSE] DANFSe gerado com sucesso via open-nfse: ' + pdfBuf.length + ' bytes');
-    return pdfBuf;
-  } catch (e) {
-    console.warn('[NFSE-PDF-OPENNFSE] Falha ao gerar DANFSe via open-nfse: ' + e.message);
-    if (e.stack) console.warn('[NFSE-PDF-OPENNFSE] Stack: ' + e.stack.split('\n').slice(0, 3).join(' | '));
-    return null;
-  }
-}
-
-module.exports = { gerarPdfDanfse, gerarDanfseOpenNfse };
+module.exports = { gerarPdfDanfse, ensureLogo, loadLogoFromFirebase };
