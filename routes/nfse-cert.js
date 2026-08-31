@@ -99,14 +99,10 @@ router.post('/logo', apiKeyAuth, async (req, res) => {
     });
 
     // Invalida cache da logo no nfse-pdf.js
-    const nfsePdf = require('../services/nfse-pdf');
-    if (nfsePdf.ensureLogo) {
-      // Forca recarregamento na proxima geracao
-      const path = require('path');
-      const fs = require('fs');
-      const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
-      try { fs.writeFileSync(logoPath, buf); } catch (e) { /* ignore */ }
-    }
+    try {
+      const nfsePdf = require('../services/nfse-pdf');
+      if (nfsePdf.resetLogoCache) nfsePdf.resetLogoCache();
+    } catch (_) { /* ignore */ }
 
     console.log('[CERT-LOGO] Logo salva no Firebase: ' + buf.length + ' bytes');
     res.json({ sucesso: true, tamanho: buf.length, mensagem: 'Logo salva no Firebase e no arquivo local.' });

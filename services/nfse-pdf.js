@@ -760,4 +760,11 @@ async function gerarPdfDanfse(nfseXml) {
   });
 }
 
-module.exports = { gerarPdfDanfse, ensureLogo, loadLogoFromFirebase };
+// Permite invalidar o cache da logo (usado apos upload via API)
+function resetLogoCache() {
+  LOGO_BUF = null;
+  logoLoaded = false;
+  console.log('[NFSE-PDF] Cache da logo invalidado.');
+}
+
+module.exports = { gerarPdfDanfse, ensureLogo, loadLogoFromFirebase, resetLogoCache };
