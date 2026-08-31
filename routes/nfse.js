@@ -14,7 +14,7 @@ const { processPendingEmissions } = require('../services/nfse-odoo-emit');
 const { cancelarNfse } = require('../services/nfse-cancelamento');
 const { gerarPdfDanfse } = require('../services/nfse-pdf');
 const { carregarCertificado } = require('../services/firebase-cert');
-const { consultarNfse } = require('../services/nfse-client');
+const { consultarNfse, baixarPdfDanfse } = require('../services/nfse-client');
 const xmlrpc = require('xmlrpc');
 
 function apiKeyAuth(req, res, next) {
@@ -320,29 +320,64 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
     }
 
     // 4. Gera e upload PDF
+    // Estrategia: 1) Tenta PDF oficial da SEFIN, 2) Fallback gera local
     try {
-      const pdfNome = 'DANFSE-' + String(numNF).padStart(6, '0') + '.pdf';
-      console.log('[NFSE-RE-ATTACH] Gerando PDF...');
-      const pdfBuf = await gerarPdfDanfse(nfseXml);
-      console.log('[NFSE-RE-ATTACH] PDF gerado: ' + pdfBuf.length + ' bytes');
-      const pdfB64 = pdfBuf.toString('base64');
-      const attachId = await new Promise((resolve, reject) => {
-        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
-          name: pdfNome, datas: pdfB64,
-          res_model: 'account.move', res_id: move_id, mimetype: 'application/pdf',
-        }]], (err, id) => err ? reject(err) : resolve(id));
-      });
-      await new Promise((resolve, reject) => {
-        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
-          model: 'account.move', res_id: move_id,
-          body: '<b>PDF DANFSe ' + numNF + '</b> (re-anexado)',
-          message_type: 'comment',
-          attachment_ids: [[6, 0, [attachId]]],
-        }]], (err, id) => err ? reject(err) : resolve(id));
-      });
-      console.log('[NFSE-RE-ATTACH] PDF anexado: ' + pdfNome + ' (attach_id=' + attachId + ')');
+      const pdfNome = 'DANFSe-' + String(numNF).padStart(6, '0') + '.pdf';
+      let pdfBuf = null;
+      let pdfOrigem = '';
+
+      // 4a. Tenta PDF oficial da SEFIN
+      if (chave) {
+        console.log('[NFSE-RE-ATTACH] 4a. Tentando PDF oficial da SEFIN (chave=' + chave + ')...');
+        try {
+          const cert = await carregarCertificado();
+          if (cert) {
+            pdfBuf = await baixarPdfDanfse(chave, cert);
+            if (pdfBuf) {
+              pdfOrigem = 'oficial_SEFIN';
+              console.log('[NFSE-RE-ATTACH] PDF oficial obtido: ' + pdfBuf.length + ' bytes');
+            }
+          }
+        } catch (ePdf) {
+          console.warn('[NFSE-RE-ATTACH] PDF oficial indisponivel: ' + ePdf.message);
+        }
+      }
+
+      // 4b. Fallback: gera PDF local
+      if (!pdfBuf) {
+        console.log('[NFSE-RE-ATTACH] 4b. Gerando PDF local (PDFKit)...');
+        try {
+          pdfBuf = await gerarPdfDanfse(nfseXml);
+          pdfOrigem = 'gerado_local';
+          console.log('[NFSE-RE-ATTACH] PDF local gerado: ' + pdfBuf.length + ' bytes');
+        } catch (eLocal) {
+          console.error('[NFSE-RE-ATTACH] FALHA ao gerar PDF local: ' + eLocal.message);
+        }
+      }
+
+      // 4c. Anexa o PDF
+      if (pdfBuf && pdfBuf.length > 0) {
+        const pdfB64 = pdfBuf.toString('base64');
+        const attachId = await new Promise((resolve, reject) => {
+          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
+            name: pdfNome, datas: pdfB64,
+            res_model: 'account.move', res_id: move_id, mimetype: 'application/pdf',
+          }]], (err, id) => err ? reject(err) : resolve(id));
+        });
+        await new Promise((resolve, reject) => {
+          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+            model: 'account.move', res_id: move_id,
+            body: '<b>DANFSe ' + numNF + '</b> (' + (pdfOrigem === 'oficial_SEFIN' ? 'PDF oficial SEFIN' : 'PDF gerado') + ') - re-anexado',
+            message_type: 'comment',
+            attachment_ids: [[6, 0, [attachId]]],
+          }]], (err, id) => err ? reject(err) : resolve(id));
+        });
+        console.log('[NFSE-RE-ATTACH] PDF anexado: ' + pdfNome + ' (attach_id=' + attachId + ', origem=' + pdfOrigem + ')');
+      } else {
+        console.error('[NFSE-RE-ATTACH] NENHUM PDF disponivel para anexar.');
+      }
     } catch (e) {
-      console.error('[NFSE-RE-ATTACH] Falha PDF:', e.message);
+      console.error('[NFSE-RE-ATTACH] Falha geral PDF:', e.message);
     }
 
     res.json({ sucesso: true, mensagem: 'Re-anexo concluido para ' + move.name });

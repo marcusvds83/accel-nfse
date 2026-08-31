@@ -13,7 +13,7 @@ const xmlrpc = require('xmlrpc');
 const config = require('../config');
 const { gerarXmlDPS } = require('./nfse-xml');
 const { assinarXml } = require('./nfse-signer');
-const { enviarDPS } = require('./nfse-client');
+const { enviarDPS, baixarPdfDanfse } = require('./nfse-client');
 const { carregarCertificado } = require('./firebase-cert');
 const { gerarPdfDanfse } = require('./nfse-pdf');
 const { cancelarNfse } = require('./nfse-cancelamento');
@@ -356,19 +356,57 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     }
 
     // 15. Gera e anexa PDF DANFSE ao chatter
+    // Estrategia: 1) Tenta baixar PDF oficial da SEFIN, 2) Fallback gera local
     try {
       if (resultado.xmlRetorno) {
         const numNF = resultado.nNFSe || proximoNumero;
-        const pdfNome = 'DANFSE-' + String(numNF).padStart(6, '0') + '.pdf';
-        console.log('[NFSE-EMIT] Gerando PDF DANFSE...');
-        const pdfBuf = await gerarPdfDanfse(resultado.xmlRetorno);
-        console.log('[NFSE-EMIT] PDF gerado: ' + pdfBuf.length + ' bytes. Anexando...');
-        await uploadAnexo(client, db, uid, 'account.move', moveId,
-          pdfNome, pdfBuf, 'application/pdf',
-          '<b>PDF DANFSe ' + numNF + '</b>');
+        const pdfNome = 'DANFSe-' + String(numNF).padStart(6, '0') + '.pdf';
+        const chaveAcesso = resultado.chaveAcesso || '';
+        let pdfBuf = null;
+        let pdfOrigem = '';
+
+        // 15a. Tenta PDF oficial da SEFIN
+        if (chaveAcesso) {
+          console.log('[NFSE-EMIT] 15a. Tentando baixar PDF oficial da SEFIN (chave=' + chaveAcesso + ')...');
+          try {
+            pdfBuf = await baixarPdfDanfse(chaveAcesso, cert);
+            if (pdfBuf) {
+              pdfOrigem = 'oficial_SEFIN';
+              console.log('[NFSE-EMIT] PDF oficial obtido da SEFIN: ' + pdfBuf.length + ' bytes');
+            }
+          } catch (ePdf) {
+            console.warn('[NFSE-EMIT] PDF oficial indisponivel: ' + ePdf.message);
+          }
+        }
+
+        // 15b. Fallback: gera PDF local com PDFKit
+        if (!pdfBuf) {
+          console.log('[NFSE-EMIT] 15b. Gerando PDF DANFSe localmente (PDFKit)...');
+          try {
+            pdfBuf = await gerarPdfDanfse(resultado.xmlRetorno);
+            pdfOrigem = 'gerado_local';
+            console.log('[NFSE-EMIT] PDF local gerado: ' + pdfBuf.length + ' bytes');
+          } catch (eLocal) {
+            console.error('[NFSE-EMIT] FALHA ao gerar PDF local: ' + eLocal.message);
+            console.error('[NFSE-EMIT] Stack: ' + (eLocal.stack || '(sem stack)'));
+          }
+        }
+
+        // 15c. Anexa o PDF ao chatter
+        if (pdfBuf && pdfBuf.length > 0) {
+          console.log('[NFSE-EMIT] 15c. Anexando PDF (' + pdfOrigem + '): ' + pdfNome + ' (' + pdfBuf.length + ' bytes)...');
+          await uploadAnexo(client, db, uid, 'account.move', moveId,
+            pdfNome, pdfBuf, 'application/pdf',
+            '<b>DANFSe ' + numNF + '</b> (' + (pdfOrigem === 'oficial_SEFIN' ? 'PDF oficial SEFIN' : 'PDF gerado') + ')');
+          console.log('[NFSE-EMIT] PDF anexado com sucesso no chatter!');
+        } else {
+          console.error('[NFSE-EMIT] NENHUM PDF gerado (nem oficial, nem local). Chatter tera apenas XML.');
+        }
+      } else {
+        console.warn('[NFSE-EMIT] xmlRetorno vazio — nao e possivel gerar PDF');
       }
     } catch (e) {
-      console.error('[NFSE-EMIT] Falha ao anexar PDF DANFSE:', e.message, e.stack);
+      console.error('[NFSE-EMIT] Falha geral ao anexar PDF DANFSE:', e.message, e.stack);
     }
 
     return { sucesso: true, nNFSe: resultado.nNFSe, chaveAcesso: resultado.chaveAcesso, nDFSe: resultado.nDFSe };

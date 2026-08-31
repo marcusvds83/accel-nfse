@@ -205,12 +205,20 @@ async function gerarPdfDanfse(nfseXml) {
     const CW = PW - M * 2; // conteudo width
 
     // --- Parseia dados do XML de retorno da SEFIN ---
+    // Extrai DPS primeiro (precisa de nDPS para o cabecalho)
+    const dpsMatch = nfseXml.match(/<DPS[^>]*>[\s\S]*?<\/DPS>/i);
+    const dpsXml = dpsMatch ? dpsMatch[0] : '';
+    const nDPS = xmlTag(dpsXml, 'nDPS');
+    // Extrai nNFSe do XML de retorno da SEFIN
+    const nNFSeMatch = nfseXml.match(/<nNFSe>(\d+)<\/nNFSe>/);
+    const nNFSe = nNFSeMatch ? nNFSeMatch[1] : '';
+
     const Id = xmlAttr(nfseXml, 'infNFSe', 'Id') || '';
     const chaveAcesso = Id.replace('NFS', '');
     // No DANFSe, mostra nDPS como numero principal (controlado pelo emitente)
     // e nNFSe como referencia governamental
     const numeroPrincipal = nDPS || nNFSe || '-';
-    const numeroGov = nNFSe !== '-' && nNFSe !== nDPS ? nNFSe : '';
+    const numeroGov = nNFSe !== '' && nNFSe !== nDPS ? nNFSe : '';
     const dhProc = xmlTag(nfseXml, 'dhProc');
     const xLocEmi = xmlTag(nfseXml, 'xLocEmi') || '';
     const xLocPrestacao = xmlTag(nfseXml, 'xLocPrestacao') || '';
@@ -237,13 +245,10 @@ async function gerarPdfDanfse(nfseXml) {
     const enderNacXml = enderNacMatch ? enderNacMatch[0] : '';
     const emitCMun = xmlTag(enderNacXml, 'cMun');
 
-    // DPS
-    const dpsMatch = nfseXml.match(/<DPS[^>]*>[\s\S]*?<\/DPS>/i);
-    const dpsXml = dpsMatch ? dpsMatch[0] : '';
+    // DPS (dpsXml e nDPS ja extraidos acima)
     const dhEmi = xmlTag(dpsXml, 'dhEmi');
     const dCompet = xmlTag(dpsXml, 'dCompet');
     const serie = xmlTag(dpsXml, 'serie');
-    const nDPS = xmlTag(dpsXml, 'nDPS');
     const opSimpNac = xmlTag(dpsXml, 'opSimpNac');
     const regApTribSN = xmlTag(dpsXml, 'regApTribSN');
 

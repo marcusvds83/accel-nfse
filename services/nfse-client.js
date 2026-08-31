@@ -287,6 +287,70 @@ async function consultarDps(idDps, cert) {
 }
 
 /**
+ * Baixa o PDF oficial do DANFSe da SEFIN.
+ * Tenta multiplos padroes de URL ate encontrar o correto.
+ * @param {string} chaveAcesso - Chave de acesso da NFS-e (50 digitos)
+ * @param {object} cert - Certificado A1 para mTLS
+ * @returns {Promise<Buffer|null>} Buffer do PDF ou null se indisponivel
+ */
+async function baixarPdfDanfse(chaveAcesso, cert) {
+  if (!chaveAcesso) {
+    console.warn('[NFSE-CLIENT-PDF] Chave de acesso vazia, nao e possivel baixar PDF oficial.');
+    return null;
+  }
+
+  const baseUrl = getBaseUrl();
+  // Padroes de URL possiveis para o PDF do DANFSe (SPED NFS-e REST v1.01)
+  const urlCandidates = [
+    baseUrl + '/nfse/' + chaveAcesso + '/documento',
+    baseUrl + '/nfse/' + chaveAcesso + '/pdf',
+    baseUrl + '/documento/' + chaveAcesso,
+    baseUrl + '/nfse/documento/' + chaveAcesso,
+  ];
+
+  const httpsAgent = createHttpsAgent(cert);
+
+  for (const url of urlCandidates) {
+    try {
+      console.log('[NFSE-CLIENT-PDF] Tentando: ' + url);
+      const response = await axios.get(url, {
+        headers: {
+          'Accept': 'application/pdf, */*',
+        },
+        httpsAgent: httpsAgent || undefined,
+        timeout: 15000,
+        rejectUnauthorized: !config.tls_insecure,
+        responseType: 'arraybuffer',
+      });
+
+      const contentType = response.headers['content-type'] || '';
+      const buf = Buffer.from(response.data);
+
+      // Verifica se recebeu um PDF valido (comeca com %PDF-)
+      if (buf.length > 100 && buf.slice(0, 5).toString('ascii').startsWith('%PDF-')) {
+        console.log('[NFSE-CLIENT-PDF] PDF oficial baixado com sucesso: ' + buf.length + ' bytes de ' + url);
+        return buf;
+      }
+
+      // Se a resposta e JSON, pode ser um erro ou XML (nao PDF)
+      if (contentType.includes('application/json') || contentType.includes('application/xml')) {
+        console.log('[NFSE-CLIENT-PDF] Resposta nao e PDF (Content-Type: ' + contentType + '), tentando proxima URL...');
+        continue;
+      }
+
+      // Resposta inesperada
+      console.log('[NFSE-CLIENT-PDF] Resposta inesperada: HTTP ' + response.status + ', Content-Type: ' + contentType + ', size: ' + buf.length);
+    } catch (err) {
+      const status = err.response ? 'HTTP ' + err.response.status : err.message;
+      console.log('[NFSE-CLIENT-PDF] Falha em ' + url + ': ' + status);
+    }
+  }
+
+  console.warn('[NFSE-CLIENT-PDF] Nenhuma URL de PDF retornou um PDF valido. O PDF sera gerado localmente como fallback.');
+  return null;
+}
+
+/**
  * Testa conexao com a API SEFIN.
  */
 async function testarConexao(cert) {
@@ -311,4 +375,4 @@ async function testarConexao(cert) {
   }
 }
 
-module.exports = { enviarDPS, consultarNfse, consultarDps, testarConexao, getBaseUrl };
+module.exports = { enviarDPS, consultarNfse, consultarDps, baixarPdfDanfse, testarConexao, getBaseUrl };

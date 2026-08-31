@@ -14,7 +14,7 @@ const router = express.Router();
 const config = require('../config');
 const xmlrpc = require('xmlrpc');
 const { carregarCertificado } = require('../services/firebase-cert');
-const { testarConexao, consultarNfse } = require('../services/nfse-client');
+const { testarConexao, consultarNfse, baixarPdfDanfse } = require('../services/nfse-client');
 const { gerarPdfDanfse } = require('../services/nfse-pdf');
 
 // === Auth ===
@@ -339,10 +339,29 @@ router.get('/dashboard/:id/pdf', apiKeyAuth, async (req, res) => {
       }
     }
 
-    if (!xml) return res.status(404).json({ erro: 'XML nao disponivel para gerar PDF' });
+    if (!xml && !move.x_nytro_nfse_codigo_verificacao) {
+      return res.status(404).json({ erro: 'XML e chave de acesso nao disponiveis' });
+    }
 
-    const pdfBuf = await gerarPdfDanfse(xml);
     const numNF = String(move.x_nytro_nfse_numero || moveId).padStart(6, '0');
+    let pdfBuf = null;
+
+    // 1. Tenta PDF oficial da SEFIN
+    if (move.x_nytro_nfse_codigo_verificacao) {
+      try {
+        const cert = await carregarCertificado();
+        if (cert) {
+          pdfBuf = await baixarPdfDanfse(move.x_nytro_nfse_codigo_verificacao, cert);
+        }
+      } catch (_) {}
+    }
+
+    // 2. Fallback: gera PDF local
+    if (!pdfBuf) {
+      if (!xml) return res.status(404).json({ erro: 'XML nao disponivel para gerar PDF local' });
+      pdfBuf = await gerarPdfDanfse(xml);
+    }
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="DANFSe-' + numNF + '.pdf"');
     res.send(pdfBuf);
