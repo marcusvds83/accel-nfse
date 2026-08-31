@@ -92,6 +92,12 @@
     $('#modal-download-xml').addEventListener('click', () => downloadFile('xml'));
     $('#modal-download-pdf').addEventListener('click', () => downloadFile('pdf'));
     $('#modal-consultar-sefin').addEventListener('click', consultarSefinFromModal);
+    $('#modal-reattach').addEventListener('click', () => {
+      if (!currentNfse) return;
+      const id = currentNfse.id;
+      closeModal();
+      setTimeout(() => window._reattach(id), 200);
+    });
 
     $('#sefin-result-close').addEventListener('click', () => {
       $('#sefin-result-overlay').classList.add('hidden');
@@ -271,6 +277,7 @@
           '<button class="btn-action" data-tooltip="Ver XML" onclick="window._openXml(' + n.id + ')" ' + (!n.tem_xml && !n.chave_acesso ? 'disabled' : '') + '>&lt;/&gt;</button>' +
           '<button class="btn-action btn-action-pdf" data-tooltip="PDF" onclick="window._downloadPdf(' + n.id + ')" ' + (!n.tem_xml && !n.chave_acesso ? 'disabled' : '') + '>PDF</button>' +
           '<button class="btn-action" data-tooltip="Consultar gov.br" onclick="window._consultarSefin(' + n.id + ')" ' + (!n.chave_acesso ? 'disabled' : '') + '>&#x1F310;</button>' +
+          (n.status_nfse === 'autorizada' ? '<button class="btn-action" data-tooltip="Re-anexar PDF+XML ao Odoo" onclick="window._reattach(' + n.id + ')" style="color:var(--warning)">&#x21BB;</button>' : '') +
         '</div></td>' +
       '</tr>';
     }).join('');
@@ -371,6 +378,28 @@
       setTimeout(() => { btn.textContent = 'Copiar'; }, 1500);
     });
   }
+
+  // --- Re-attach PDF+XML to Odoo ---
+  window._reattach = async function(id) {
+    const nf = allNfses.find(n => n.id === id);
+    if (!nf) return;
+    if (!confirm('Re-anexar PDF + XML da NFS-e ' + (nf.numero_nfse || nf.fatura) + ' ao chatter do Odoo?')) return;
+    try {
+      const r = await fetch('/api/v1/nfse/re-attach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
+        body: JSON.stringify({ move_id: id }),
+      });
+      const data = await r.json();
+      if (data.sucesso) {
+        alert('PDF + XML re-anexados com sucesso!\nVerifique o chatter da fatura ' + nf.fatura + ' no Odoo.');
+      } else {
+        alert('Falha: ' + (data.erro || 'Erro desconhecido'));
+      }
+    } catch (err) {
+      alert('Erro: ' + err.message);
+    }
+  };
 
   function downloadFile(type) {
     if (!currentNfse) return;
