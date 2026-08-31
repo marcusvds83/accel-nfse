@@ -320,28 +320,25 @@ async function gerarPdfDanfse(nfseXml) {
     let y = M;
     const headerH = 42;
 
-    // Badge verde "NFSe" (canto esquerdo)
-    fillRect(doc, M + 2, y + 2, 52, 22, GREEN_DARK);
-    doc.font('Helvetica-Bold').fontSize(14).fillColor(WHITE);
-    doc.text('NFSe', M + 6, y + 6, { width: 44, align: 'center' });
-
-    // "Nota Fiscal de Servicos Eletronica" ao lado do badge
-    doc.font('Helvetica-Bold').fontSize(8).fillColor(BLACK);
-    doc.text('Nota Fiscal de Servi\u00e7os Eletr\u00f4nica', M + 58, y + 5, { width: 200, lineBreak: false });
-
-    // Logo da empresa (Nytro) — canto esquerdo, abaixo do badge
+    // Logo da empresa (Nytro) — NO LUGAR do badge verde (canto esquerdo, grande)
     const logoBuf = await ensureLogo();
     if (logoBuf) {
       try {
-        doc.image(logoBuf, M + 2, y + 27, { height: 14 });
+        doc.image(logoBuf, M + 2, y + 2, { height: 36 });
       } catch (_) {
-        doc.font('Helvetica-Bold').fontSize(9).fillColor(GREEN_DARK);
-        doc.text('NYTRO', M + 4, y + 28);
+        doc.font('Helvetica-Bold').fontSize(14).fillColor(GREEN_DARK);
+        doc.text('NYTRO', M + 4, y + 10);
       }
     } else {
-      doc.font('Helvetica-Bold').fontSize(9).fillColor(GREEN_DARK);
-      doc.text('NYTRO', M + 4, y + 28);
+      // Fallback: badge verde "NFSe" se nao tiver logo
+      fillRect(doc, M + 2, y + 2, 52, 22, GREEN_DARK);
+      doc.font('Helvetica-Bold').fontSize(14).fillColor(WHITE);
+      doc.text('NFSe', M + 6, y + 6, { width: 44, align: 'center' });
     }
+
+    // "Nota Fiscal de Servicos Eletronica" ao lado da logo
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(BLACK);
+    doc.text('Nota Fiscal de Servi\u00e7os Eletr\u00f4nica', M + 58, y + 5, { width: 200, lineBreak: false });
 
     // Titulo central: DANFSe v2.0 (sublinhado)
     doc.font('Helvetica-Bold').fontSize(12).fillColor(BLACK);
