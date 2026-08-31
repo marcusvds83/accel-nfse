@@ -1,5 +1,5 @@
 /**
- * config.js — Configuracoes do middleware NFS-e Nytro (SPED NFS-e)
+ * config.js — Configuracoes do middleware NFS-e/NF-e Accel (SPED NFS-e + NF-e SEFAZ)
  * =================================================================
  * Todas as configuracoes sao lidas de variaveis de ambiente.
  * No Render, defina-as no painel Environment Variables.
@@ -28,7 +28,7 @@ module.exports = {
     // Serie: emissao propria (own-app) exige 1-49999. Ignora env var se fora da faixa.
     serie: (() => { const s = process.env.NFSE_SERIE || '1'; const n = parseInt(s, 10); return (n >= 1 && n <= 49999) ? s : '1'; })(),
     versao: process.env.NFSE_VERSAO || '1.01',
-    ver_aplic: process.env.NFSE_VER_APLIC || 'nfse-nytro_1.0.0',
+    ver_aplic: process.env.NFSE_VER_APLIC || 'accel-nfse_1.0.0',
     inscricao_municipal: process.env.NFSE_IM || '080212854094',
     // Regime tributario (Simples Nacional)
     op_simp_nac: parseInt(process.env.NFSE_OP_SIMP_NAC || '3', 10), // 3=Simples Nacional

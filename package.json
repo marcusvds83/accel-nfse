@@ -1,7 +1,7 @@
 {
-  "name": "nfse-nytro",
+  "name": "accel-nfse",
   "version": "1.0.0",
-  "description": "Middleware de emissao propria de NFS-e para Nytro LTDA (Curitiba/PR) - SPED NFS-e v1.01",
+  "description": "Middleware de emissao propria de NFS-e/NF-e para Accel (Curitiba/PR) - SPED NFS-e v1.01 + NF-e SEFAZ",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

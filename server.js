@@ -1,7 +1,7 @@
 /**
- * server.js — Servidor Express do middleware NFS-e Nytro
+ * server.js — Servidor Express do middleware NFS-e/NF-e Accel
  * =========================================================
- * Curitiba/PR | SPED NFS-e v1.01 | Certificado A1 | Firebase (cofre)
+ * Curitiba/PR | SPED NFS-e v1.01 | NF-e SEFAZ | Certificado A1 | Firebase (cofre)
  *
  * Rotas:
  *   GET  /                          — Painel Dashboard (SPA)
@@ -95,7 +95,7 @@ app.use((err, req, res, _next) => {
 
 // === Inicializar ===
 app.listen(config.port, () => {
-  console.log('=== NFS-e Nytro Middleware ===');
+  console.log('=== NFS-e/NF-e Accel Middleware ===');
   console.log('Porta: ' + config.port);
   console.log('Cidade: ' + config.nfse.cidade + '/' + config.nfse.uf);
   console.log('Ambiente: ' + (config.nfse.tp_amb === 1 ? 'PRODUCAO' : 'HOMOLOGACAO (Producao Restrita)'));
