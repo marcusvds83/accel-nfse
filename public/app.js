@@ -464,7 +464,7 @@
   // --- Tab Navigation ---
   function initTabs() {
     const tabs = document.querySelectorAll('#main-tabs .tab-btn');
-    const panels = { painel: $('#dashboard'), docs: $('#tab-docs'), impostos: $('#tab-impostos'), campos: $('#tab-campos') };
+    const panels = { painel: $('#dashboard'), docs: $('#tab-docs'), impostos: $('#tab-impostos'), setup: $('#tab-setup'), campos: $('#tab-campos') };
     tabs.forEach(btn => {
       btn.addEventListener('click', () => {
         const tab = btn.dataset.tab;
@@ -482,6 +482,7 @@
         // Load tab-specific data
         if (tab === 'docs') loadDocsConfig();
         if (tab === 'impostos') loadImpostosConfig();
+        if (tab === 'setup') loadSetupStatus();
       });
     });
   }
@@ -628,6 +629,66 @@
       alert(lines + '\n\nContexto: ' + JSON.stringify(d.contexto));
     } catch (e) { alert('Erro: ' + e.message); }
     btn.disabled = false; btn.textContent = 'Criar Server Actions';
+  });
+
+  // --- Setup Tab ---
+  async function loadSetupStatus() {
+    try {
+      const r = await apiFetch('/api/v1/nfse/dashboard/cert-status');
+      const d = await r.json();
+      const el = $('#cert-status-setup');
+      if (d.carregado) {
+        const info = d.info || {};
+        el.innerHTML = '<span style="color:var(--accent);font-weight:600">Certificado OK</span> | ' + (info.subject?.CN || 'N/A') + ' | Validade: ' + (info.validade || '?');
+      } else {
+        el.innerHTML = '<span style="color:var(--danger);font-weight:600">Nenhum certificado carregado</span> — faca o upload abaixo.';
+      }
+    } catch (e) { $('#cert-status-setup').innerHTML = '<span style="color:var(--danger)">Erro ao verificar</span>'; }
+  }
+
+  // Upload Cert via UI
+  $('#btn-upload-cert').addEventListener('click', async () => {
+    const fileInput = document.getElementById('inp-cert-file');
+    const senha = document.getElementById('inp-cert-senha').value.trim();
+    const file = fileInput.files[0];
+    if (!file) { alert('Selecione o arquivo PFX.'); return; }
+    if (!senha) { alert('Digite a senha do certificado.'); return; }
+    const btn = $('#btn-upload-cert'); btn.disabled = true; btn.textContent = 'Enviando...';
+    try {
+      const b64 = await file.text();
+      const r = await fetch('/api/v1/nfse/certificado', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
+        body: JSON.stringify({ pfxBase64: b64, senha }),
+      });
+      const d = await r.json();
+      if (d.sucesso) { alert('Certificado salvo com sucesso no Firebase!\n\n' + JSON.stringify(d.info, null, 2)); loadSetupStatus(); }
+      else { alert('Erro: ' + (d.erro || '')); }
+    } catch (e) { alert('Erro: ' + e.message); }
+    btn.disabled = false; btn.textContent = 'Enviar Certificado';
+  });
+
+  // Upload Logo via UI
+  $('#btn-upload-logo').addEventListener('click', async () => {
+    const fileInput = document.getElementById('inp-logo-file');
+    const file = fileInput.files[0];
+    if (!file) { alert('Selecione a imagem da logo.'); return; }
+    const btn = $('#btn-upload-logo'); btn.disabled = true; btn.textContent = 'Enviando...';
+    try {
+      const b64 = await file.text();
+      const r = await fetch('/api/v1/nfse/certificado/logo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
+        body: JSON.stringify({ logoBase64: b64 }),
+      });
+      const d = await r.json();
+      if (d.sucesso) {
+        const preview = $('#logo-preview');
+        preview.innerHTML = '<img src="data:image/png;base64,' + b64 + '" style="max-height:80px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card)"> <span style="color:var(--accent);font-weight:600;margin-left:12px">Logo salva! (' + d.tamanho + ' bytes)</span>';
+        alert('Logo salva no Firebase! (' + d.tamanho + ' bytes)');
+      } else { alert('Erro: ' + (d.erro || '')); }
+    } catch (e) { alert('Erro: ' + e.message); }
+    btn.disabled = false; btn.textContent = 'Enviar Logo';
   });
 
   // --- Start ---

@@ -48,6 +48,7 @@
         <button class="tab-btn active" data-tab="painel">Painel</button>
         <button class="tab-btn" data-tab="docs">Documentacao</button>
         <button class="tab-btn" data-tab="impostos">Impostos</button>
+        <button class="tab-btn" data-tab="setup">Setup</button>
         <button class="tab-btn" data-tab="campos">Campos Odoo</button>
       </nav>
       <div class="topbar-right">
@@ -454,6 +455,143 @@
               <button class="btn-primary" id="btn-salvar-im" style="padding:8px 16px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600">Salvar IM no Odoo</button>
               <span id="im-salvar-status" style="color:var(--muted)"></span>
             </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Tab: Setup -->
+  <div id="tab-setup" class="tab-content hidden">
+    <main class="main-content">
+      <div class="doc-container">
+        <h2 class="doc-title">Configuracao Inicial</h2>
+        <p class="doc-subtitle">Upload do certificado A1 e logo — pronto para clonar para outro cliente</p>
+
+        <!-- Certificado A1 -->
+        <section class="doc-section">
+          <h3 class="doc-h3" style="cursor:default">Certificado Digital A1 (PFX)</h3>
+          <div class="doc-body">
+            <div id="cert-status-setup" style="margin-bottom:12px;padding:10px;background:var(--bg-input);border-radius:8px;border:1px solid var(--border)">
+              <span style="color:var(--text-muted)">Verificando...</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div>
+                <label style="font-size:0.78rem;color:var(--text-muted);display:block;margin-bottom:4px">Arquivo PFX (.pfx)</label>
+                <input type="file" id="inp-cert-file" accept=".pfx,.p12" style="color:var(--text-secondary);font-size:0.82rem">
+              </div>
+              <div>
+                <label style="font-size:0.78rem;color:var(--text-muted);display:block;margin-bottom:4px">Senha do Certificado</label>
+                <input type="password" id="inp-cert-senha" placeholder="Digite a senha do PFX" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);width:300px">
+              </div>
+              <button id="btn-upload-cert" style="padding:10px 24px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600;font-size:0.85rem;align-self:flex-start">Enviar Certificado</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Logo -->
+        <section class="doc-section">
+          <h3 class="doc-h3" style="cursor:default">Logo da Empresa (DANFSe)</h3>
+          <div class="doc-body">
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div>
+                <label style="font-size:0.78rem;color:var(--text-muted);display:block;margin-bottom:4px">Imagem da Logo (PNG recomendado)</label>
+                <input type="file" id="inp-logo-file" accept=".png,.jpg,.jpeg,.webp" style="color:var(--text-secondary);font-size:0.82rem">
+              </div>
+              <button id="btn-upload-logo" style="padding:10px 24px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600;font-size:0.85rem;align-self:flex-start">Enviar Logo</button>
+            </div>
+            <div id="logo-preview" style="margin-top:12px"></div>
+          </div>
+        </section>
+
+        <!-- Docs completas -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Guia de Implementacao para Novo Cliente</h3>
+          <div class="doc-body">
+            <p>Para replicar este emissor NFS-e em outro cliente, siga estes passos <b>na ordem</b>:</p>
+            <ol class="doc-steps">
+              <li><strong>Clonar o repositorio</strong><br><code>git clone https://github.com/marcusvds83/nfse-nytro.git<br>cd nfse-nytro<br>npm install</code></li>
+              <li><strong>Criar novo servico no Render</strong><br>Novo Web Service apontando para o repo. O Render faz deploy automatico.</li>
+              <li><strong>Criar projeto no Firebase</strong><br>Console Firebase → Novo Projeto → Firestore Database (modo de teste) → Adicionar SDK Admin → Gerar chave privada (JSON) → Baixar o arquivo JSON.</li>
+              <li><strong>Configurar variaveis de ambiente no Render</strong> (todas obrigatorias):
+                <div class="doc-code">API_KEY=uma-chave-secreta-para-o-painel
+ODOO_ENABLED=1
+ODOO_URL=https://cliente.odoo.com
+ODOO_DB=cliente-production-12345
+ODOO_USER=admin@cliente.com
+ODOO_API_KEY=a1b2c3d4e5f6...
+NFSE_TP_AMB=2          (2=homologacao primeiro, depois mude para 1)
+NFSE_CIDADE=Curitiba
+NFSE_UF=PR
+NFSE_CODIGO_IBGE=4106902
+NFSE_IM=123456789012
+NFSE_ALIQUOTA_ISS=5.00
+NFSE_C_TRIB_NAC=080201
+NFSE_C_NBS=122051900
+NFSE_OP_SIMP_NAC=3
+NFSE_P_TOT_TRIB_SN=6.00
+FIREBASE_PROJECT_ID=meu-projeto-firebase
+FIREBASE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBg...\n-----END PRIVATE KEY-----\nFIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxx@meu-projeto.iam.gserviceaccount.com
+FIREBASE_CERT_COLLECTION=certificados
+FIREBASE_CERT_DOC_ID=cliente-a1</div>
+              </li>
+              <li><strong>Fazer deploy</strong> — o Render detecta o push e faz deploy automatico. Verifique os logs.</li>
+              <li><strong>Abrir o painel</strong> — acesse <code>https://seu-servico.onrender.com</code>, insira a API_KEY definida acima.</li>
+              <li><strong>Aba Setup</strong> (esta aba): faca upload do <b>certificado A1</b> (arquivo .pfx + senha). O certificado e salvo no Firebase e persiste entre deploys.</li>
+              <li><strong>Aba Setup</strong>: faca upload da <b>logo</b> da empresa (PNG). A logo aparece no DANFSe gerado pelo middleware.</li>
+              <li><strong>Aba Campos Odoo</strong>: clique <b>"Verificar Campos"</b> para checar, depois <b>"Criar Campos Ausentes"</b>. Isso cria os 16 campos x_nytro_* no Odoo.</li>
+              <li><strong>Aba Campos Odoo</strong>: clique <b>"Criar Server Actions"</b>. Isso cria as acoes de Emitir e Cancelar NFS-e no Odoo.</li>
+              <li><strong>No Odoo</strong>: adicione os botoes das Server Actions na view de fatura. Va em Configuracao → Tecnico → Server Actions, encontre as acoes criadas, e adicione na view de <code>account.move</code>.</li>
+              <li><strong>Aba Impostos</strong>: configure os impostos por produto (codigo tributacao, NBS, aliquota ISS, retencao) e clique <b>"Enviar ao Odoo"</b>.</li>
+              <li><strong>Testar em homologacao</strong> (<code>NFSE_TP_AMB=2</code>): crie uma fatura de teste, clique em Emitir NFS-e, verifique os logs e o resultado no gov.br.</li>
+              <li><strong>Mudar para producao</strong>: altere <code>NFSE_TP_AMB=1</code> nas variaveis de ambiente no Render. Reinicie o servico.</li>
+            </ol>
+          </div>
+        </section>
+
+        <!-- Variaveis -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Referencia Completa de Variaveis de Ambiente</h3>
+          <div class="doc-body">
+            <table class="doc-table">
+              <thead><tr><th>Variavel</th><th>Obrig.</th><th>Exemplo</th><th>Descricao</th></tr></thead>
+              <tbody>
+                <tr><td><code>PORT</code></td><td>Nao</td><td>10000</td><td>Porta do servidor (Render define automaticamente)</td></tr>
+                <tr><td><code>API_KEY</code></td><td><b>Sim</b></td><td>sua-chave-secreta</td><td>Chave para acessar o painel e a API</td></tr>
+                <tr><td><code>NFSE_TLS_INSECURE</code></td><td>Nao</td><td>1</td><td>Desativa validacao TLS (debug apenas)</td></tr>
+                <tr><td colspan="4" style="background:rgba(16,185,129,0.1);font-weight:600;color:var(--accent)">ODOO</td></tr>
+                <tr><td><code>ODOO_ENABLED</code></td><td><b>Sim</b></td><td>1</td><td>Habilita integracao com Odoo (0=desabilitado)</td></tr>
+                <tr><td><code>ODOO_URL</code></td><td><b>Sim</b></td><td>https://empresa.odoo.com</td><td>URL completa do Odoo (sem barra final)</td></tr>
+                <tr><td><code>ODOO_DB</code></td><td><b>Sim</b></td><td>empresa-production-12345</td><td>Nome do database Odoo</td></tr>
+                <tr><td><code>ODOO_USER</code></td><td><b>Sim</b></td><td>admin@empresa.com</td><td>Email de login do usuario Odoo</td></tr>
+                <tr><td><code>ODOO_API_KEY</code></td><td><b>Sim</b></td><td>a1b2c3...</td><td>API Key do usuario (configurada em Configuracao → Preferencias → Conta)</td></tr>
+                <tr><td><code>ODOO_POLLING_MS</code></td><td>Nao</td><td>15000</td><td>Intervalo do polling em ms (minimo 5000)</td></tr>
+                <tr><td colspan="4" style="background:rgba(16,185,129,0.1);font-weight:600;color:var(--accent)">NFS-e / SPED</td></tr>
+                <tr><td><code>NFSE_TP_AMB</code></td><td><b>Sim</b></td><td>2</td><td>1=Producao, 2=Homologacao (producao restrita)</td></tr>
+                <tr><td><code>NFSE_CIDADE</code></td><td>Nao</td><td>Curitiba</td><td>Nome da cidade</td></tr>
+                <tr><td><code>NFSE_UF</code></td><td>Nao</td><td>PR</td><td>Sigla do estado</td></tr>
+                <tr><td><code>NFSE_CODIGO_IBGE</code></td><td>Nao</td><td>4106902</td><td>Codigo IBGE do municipio (7 digitos)</td></tr>
+                <tr><td><code>NFSE_IM</code></td><td>Nao</td><td>080212854094</td><td>Inscricao Municipal do prestador</td></tr>
+                <tr><td><code>NFSE_ALIQUOTA_ISS</code></td><td>Nao</td><td>5.00</td><td>Aliquota ISS padrao (%)</td></tr>
+                <tr><td><code>NFSE_C_TRIB_NAC</code></td><td>Nao</td><td>080201</td><td>Codigo de tributacao nacional (LC 116)</td></tr>
+                <tr><td><code>NFSE_C_NBS</code></td><td>Nao</td><td>122051900</td><td>Codigo NBS do servico</td></tr>
+                <tr><td><code>NFSE_OP_SIMP_NAC</code></td><td>Nao</td><td>3</td><td>1=Nao optante, 2=Simples, 3=ME/EPP</td></tr>
+                <tr><td><code>NFSE_REG_AP_TRIB_SN</code></td><td>Nao</td><td>1</td><td>Regime de apuracao SN</td></tr>
+                <tr><td><code>NFSE_P_TOT_TRIB_SN</code></td><td>Nao</td><td>6.00</td><td>Carga tributaria total SN (%)</td></tr>
+                <tr><td><code>NFSE_SERIE</code></td><td>Nao</td><td>1</td><td>Serie da NFS-e (1-49999)</td></tr>
+                <tr><td><code>NFSE_VER_APLIC</code></td><td>Nao</td><td>nfse-nytro_1.0.0</td><td>Versao da aplicacao (enviada no XML)</td></tr>
+                <tr><td><code>NYTRO_LOGO_URL</code></td><td>Nao</td><td>https://...</td><td>URL da logo (fallback se nao tiver no Firebase)</td></tr>
+                <tr><td colspan="4" style="background:rgba(16,185,129,0.1);font-weight:600;color:var(--accent)">SEFIN (URLs)</td></tr>
+                <tr><td><code>SEFIN_PROD_URL</code></td><td>Nao</td><td>https://sefin.nfse.gov.br/SefinNacional</td><td>URL producao</td></tr>
+                <tr><td><code>SEFIN_HOM_URL</code></td><td>Nao</td><td>https://sefin.producaorestrita.nfse.gov.br/SefinNacional</td><td>URL homologacao</td></tr>
+                <tr><td colspan="4" style="background:rgba(16,185,129,0.1);font-weight:600;color:var(--accent)">FIREBASE (Cofre do Certificado)</td></tr>
+                <tr><td><code>FIREBASE_PROJECT_ID</code></td><td><b>Sim</b></td><td>nfsenytro</td><td>ID do projeto Firebase</td></tr>
+                <tr><td><code>FIREBASE_PRIVATE_KEY</code></td><td><b>Sim</b></td><td>-----BEGIN PRIVATE KEY-----</td><td>Chave privada do service account (com \n no final de cada linha)</td></tr>
+                <tr><td><code>FIREBASE_CLIENT_EMAIL</code></td><td><b>Sim</b></td><td>...@nfsenytro.iam.gserviceaccount.com</td><td>Email do service account Firebase</td></tr>
+                <tr><td><code>FIREBASE_CERT_COLLECTION</code></td><td>Nao</td><td>certificados</td><td>Colecao Firestore onde o certificado e logo ficam</td></tr>
+                <tr><td><code>FIREBASE_CERT_DOC_ID</code></td><td>Nao</td><td>nytro-a1</td><td>ID do documento do certificado na colecao</td></tr>
+              </tbody>
+            </table>
           </div>
         </section>
       </div>

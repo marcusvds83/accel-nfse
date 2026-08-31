@@ -187,15 +187,13 @@ router.post('/admin/campos/server-actions', apiKeyAuth, async (req, res) => {
         nome: 'Nytro: Solicitar Emissao NFS-e',
         model: 'account.move',
         tipo: 'code',
-        codigo: """# Torna a fatura 'posted' se necessario, depois marca para emissao
-if record.state != 'posted':\n    record.action_post()\nrecord.x_nytro_nfse_status = 'pendente'\nrecord.x_nytro_nfse_erro = False\nrecord.x_nytro_nfse_mensagem = False\n""",
+        codigo: "if record.state != 'posted':\n    record.action_post()\nrecord.x_nytro_nfse_status = 'pendente'\nrecord.x_nytro_nfse_erro = False\nrecord.x_nytro_nfse_mensagem = False",
       },
       {
         nome: 'Nytro: Solicitar Cancelamento NFS-e',
         model: 'account.move',
         tipo: 'code',
-        codigo: """# Solicita cancelamento da NFS-e autorizada
-if record.x_nytro_nfse_status == 'autorizada':\n    record.x_nytro_nfse_status = 'cancelar_solicitado'\nelse:\n    raise UserWarning('Apenas NFS-e autorizadas podem ser canceladas. Status atual: %s' % record.x_nytro_nfse_status)\n""",
+        codigo: "if record.x_nytro_nfse_status == 'autorizada':\n    record.x_nytro_nfse_status = 'cancelar_solicitado'\nelse:\n    raise UserWarning('Apenas NFS-e autorizadas podem ser canceladas. Status atual: %s' % record.x_nytro_nfse_status)",
       },
     ];
 
