@@ -13,6 +13,22 @@
   let refreshTimer = null;
   let sefinTimer = null;
 
+  // --- URL Routing ---
+  const TAB_PATHS = {
+    painel: '/painel',
+    docs: '/documentacao',
+    impostos: '/impostos',
+    setup: '/setup',
+    campos: '/campo-odoo'
+  };
+  const PATH_TO_TAB = {};
+  for (const [tab, path] of Object.entries(TAB_PATHS)) PATH_TO_TAB[path] = tab;
+
+  function resolveTabFromPath() {
+    const p = window.location.pathname.replace(/\/+$/, '');
+    return PATH_TO_TAB[p] || 'painel';
+  }
+
   // --- DOM ---
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
@@ -38,11 +54,8 @@
   function showDashboard() {
     $('#auth-screen').classList.add('hidden');
     $('#dashboard').classList.remove('hidden');
-    loadDashboard();
-    loadSefinStatus();
     loadCertStatus();
-    refreshTimer = setInterval(loadDashboard, 10000);
-    sefinTimer = setInterval(loadSefinStatus, 30000);
+    // Data loading and timers are handled by switchTab via initTabs
   }
 
   function bindEvents() {
@@ -461,30 +474,59 @@
     'cancelar_solicitado': 'Cancel. Solicitado',
   };
 
-  // --- Tab Navigation ---
+  // --- Tab Navigation + URL Routing ---
   function initTabs() {
     const tabs = document.querySelectorAll('#main-tabs .tab-btn');
-    const panels = { painel: $('#dashboard'), docs: $('#tab-docs'), impostos: $('#tab-impostos'), setup: $('#tab-setup'), campos: $('#tab-campos') };
-    tabs.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tab = btn.dataset.tab;
-        tabs.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        Object.values(panels).forEach(p => { if (p) p.classList.add('hidden'); });
-        if (panels[tab]) panels[tab].classList.remove('hidden');
-        // Pause/resume auto-refresh when not on painel
-        if (tab === 'painel') {
-          if (!refreshTimer) { refreshTimer = setInterval(loadDashboard, 10000); sefinTimer = setInterval(loadSefinStatus, 30000); }
-          loadDashboard();
-        } else {
-          clearInterval(refreshTimer); clearInterval(sefinTimer); refreshTimer = null; sefinTimer = null;
-        }
-        // Load tab-specific data
-        if (tab === 'docs') loadDocsConfig();
-        if (tab === 'impostos') loadImpostosConfig();
-        if (tab === 'setup') loadSetupStatus();
+    const panels = { painel: $('#tab-painel'), docs: $('#tab-docs'), impostos: $('#tab-impostos'), setup: $('#tab-setup'), campos: $('#tab-campos') };
+
+    function switchTab(tabName, pushState) {
+      // Update active button
+      tabs.forEach(b => b.classList.remove('active'));
+      const activeBtn = document.querySelector('#main-tabs .tab-btn[data-tab="' + tabName + '"]');
+      if (activeBtn) activeBtn.classList.add('active');
+      // Show/hide panels
+      Object.entries(panels).forEach(function(entry) {
+        var key = entry[0], panel = entry[1];
+        if (!panel) return;
+        if (key === tabName) panel.classList.remove('hidden');
+        else panel.classList.add('hidden');
+      });
+      // Pause/resume auto-refresh
+      if (tabName === 'painel') {
+        if (!refreshTimer) { refreshTimer = setInterval(loadDashboard, 10000); sefinTimer = setInterval(loadSefinStatus, 30000); }
+        loadDashboard();
+      } else {
+        clearInterval(refreshTimer); clearInterval(sefinTimer); refreshTimer = null; sefinTimer = null;
+      }
+      // Load tab-specific data
+      if (tabName === 'docs') loadDocsConfig();
+      if (tabName === 'impostos') loadImpostosConfig();
+      if (tabName === 'setup') loadSetupStatus();
+      // Update URL
+      if (pushState && TAB_PATHS[tabName]) {
+        history.pushState({ tab: tabName }, '', TAB_PATHS[tabName]);
+      }
+    }
+
+    // Click handlers
+    tabs.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        switchTab(btn.dataset.tab, true);
       });
     });
+
+    // Back/forward navigation
+    window.addEventListener('popstate', function(e) {
+      var tab = (e.state && e.state.tab) || resolveTabFromPath();
+      switchTab(tab, false);
+    });
+
+    // Initial tab from URL — redirect / to /painel
+    var initialTab = resolveTabFromPath();
+    if (window.location.pathname.replace(/\/+$/, '') === '' || window.location.pathname === '/') {
+      history.replaceState({ tab: 'painel' }, '', '/painel');
+    }
+    switchTab(initialTab, false);
   }
 
   // --- Docs: Load Config ---
