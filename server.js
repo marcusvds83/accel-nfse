@@ -30,6 +30,7 @@ const path = require('path');
 const certRoutes = require('./routes/nfse-cert');
 const nfseRoutes = require('./routes/nfse');
 const dashboardRoutes = require('./routes/dashboard');
+const adminToolsRoutes = require('./routes/admin-tools');
 const { processPendingEmissions } = require('./services/nfse-odoo-emit');
 
 const app = express();
@@ -58,6 +59,7 @@ app.get('/health', (req, res) => {
 app.use('/api/v1/nfse/certificado', certRoutes);
 app.use('/api/v1/nfse', nfseRoutes);
 app.use('/api/v1/nfse', dashboardRoutes);
+app.use('/api/v1/nfse', adminToolsRoutes);
 
 // === Polling de emissões pendentes ===
 let pollingTimer = null;

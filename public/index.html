@@ -44,6 +44,12 @@
         </div>
         <div class="topbar-env" id="env-badge">HOMOLOGACAO</div>
       </div>
+      <nav class="topbar-tabs" id="main-tabs">
+        <button class="tab-btn active" data-tab="painel">Painel</button>
+        <button class="tab-btn" data-tab="docs">Documentacao</button>
+        <button class="tab-btn" data-tab="impostos">Impostos</button>
+        <button class="tab-btn" data-tab="campos">Campos Odoo</button>
+      </nav>
       <div class="topbar-right">
         <div class="status-indicator" id="sefin-indicator">
           <span class="status-dot"></span>
@@ -198,6 +204,327 @@
         <span id="last-update">--</span>
         <span class="auto-refresh">Auto-refresh: 10s</span>
       </section>
+    </main>
+  </div>
+
+  <!-- Tab: Documentacao -->
+  <div id="tab-docs" class="tab-content hidden">
+    <main class="main-content">
+      <div class="doc-container">
+        <h2 class="doc-title">Documentacao Tecnica — NFS-e Nytro</h2>
+        <p class="doc-subtitle">SPED NFS-e v1.01 | Middleware Nytro | Curitiba/PR</p>
+
+        <!-- Arquitetura -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Arquitetura do Middleware</h3>
+          <div class="doc-body">
+            <div class="arch-diagram">
+              <div class="arch-box"><strong>Odoo 19 Online</strong><br>Fatura (account.move)<br>Status: x_nytro_nfse_status<br>Botao: Server Action</div>
+              <div class="arch-arrow">XML-RPC polling (15s)</div>
+              <div class="arch-box accent"><strong>Middleware Nytro</strong><br>Express.js + Render<br>XML DPS + XMLDSig (A1)<br>mTLS + GZip+Base64</div>
+              <div class="arch-arrow">REST API + mTLS</div>
+              <div class="arch-box"><strong>SEFIN Nacional</strong><br>sefin.nfse.gov.br<br>SPED NFS-e v1.01<br>Producao / Homologacao</div>
+            </div>
+            <p>O middleware opera em <b>polling</b>: a cada 15 segundos, busca faturas com <code>x_nytro_nfse_status = 'pendente'</code> no Odoo, gera o XML DPS, assina com certificado A1, envia à SEFIN, e atualiza o Odoo com o resultado.</p>
+          </div>
+        </section>
+
+        <!-- Fluxo Emissao -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Fluxo de Emissao NFS-e (passo a passo)</h3>
+          <div class="doc-body">
+            <ol class="doc-steps">
+              <li><strong>Odoo:</strong> Usuario clica no botao <b>"Emitir NFS-e"</b> (Server Action marca <code>x_nytro_nfse_status = 'pendente'</code>)</li>
+              <li><strong>Middleware (polling):</strong> Detecta fatura pendente via XML-RPC</li>
+              <li><strong>Middleware:</strong> Le dados da fatura, empresa, parceiro, produtos e impostos</li>
+              <li><strong>Middleware:</strong> Gera XML DPS v1.01 com todos os campos obrigatorios</li>
+              <li><strong>Middleware:</strong> Assina XML com <b>XMLDSig RSA-SHA256</b> (certificado A1 do Firebase)</li>
+              <li><strong>Middleware:</strong> Comprime XML com GZip, codifica em Base64, envia via POST para SEFIN com mTLS</li>
+              <li><strong>SEFIN:</strong> Valida XML, processa DPS, retorna XML de resposta com chave de acesso e numero</li>
+              <li><strong>Middleware:</strong> Atualiza campos no Odoo (status, numero, chave, protocolo, data, XML)</li>
+              <li><strong>Middleware:</strong> Anexa XML ao chatter da fatura</li>
+              <li><strong>Middleware:</strong> Gera PDF DANFSe (PDFKit com logo Nytro) e anexa ao chatter</li>
+            </ol>
+          </div>
+        </section>
+
+        <!-- Fluxo Cancelamento -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Fluxo de Cancelamento NFS-e (passo a passo)</h3>
+          <div class="doc-body">
+            <ol class="doc-steps">
+              <li><strong>Odoo:</strong> Usuario clica em <b>"Cancelar NFS-e"</b> (Server Action marca <code>x_nytro_nfse_status = 'cancelar_solicitado'</code>)</li>
+              <li><strong>Middleware (polling):</strong> Detecta fatura com status <code>cancelar_solicitado</code></li>
+              <li><strong>Middleware:</strong> Le a chave de acesso (<code>x_nytro_nfse_codigo_verificacao</code>)</li>
+              <li><strong>Middleware:</strong> Gera XML <code>pedRegEvento</code> v1.01 com evento <code>e101101</code></li>
+              <li><strong>Estrutura:</strong> <code>&lt;pedRegEvento&gt; &gt; &lt;infPedReg Id="PRE+chave+101101"&gt; &gt; tpAmb, verAplic, dhEvento, CNPJAutor, chNFSe, e101101</li>
+              <li><strong>e101101:</strong> <code>xDesc</code> = "Cancelamento de NFS-e" (obrigatorio), <code>cMotivo</code> (1/2/9), <code>xMotivo</code> (min 15 chars)</li>
+              <li><strong>Middleware:</strong> Assina <code>infPedReg</code> com XMLDSig RSA-SHA256</li>
+              <li><strong>Middleware:</strong> GZip+Base64, POST para <code>/SefinNacional/nfse/{chave}/eventos</code></li>
+              <li><strong>SEFIN:</strong> Registra evento de cancelamento com data/hora</li>
+              <li><strong>Middleware:</strong> Atualiza Odoo: status = 'cancelada' ou volta para 'autorizada' se falhou</li>
+            </ol>
+          </div>
+        </section>
+
+        <!-- XML DPS -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Estrutura do XML DPS v1.01</h3>
+          <div class="doc-body">
+            <pre class="doc-code">&lt;DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"&gt;
+  &lt;infDPS Id="NFS41069022..."&gt;
+    &lt;ideDPS&gt;
+      &lt;nDPS&gt;84&lt;/nDPS&gt;  (numero controlado pelo emitente)
+      &lt;serie&gt;1&lt;/serie&gt;
+      &lt;dhEmi&gt;2026-08-31T09:00:00-03:00&lt;/dhEmi&gt;
+      &lt;dCompet&gt;2026-08-31&lt;/dCompet&gt;
+      &lt;tpAmb&gt;1&lt;/tpAmb&gt;  (1=producao, 2=homologacao)
+      &lt;verAplic&gt;nfse-nytro_1.0.0&lt;/verAplic&gt;
+      &lt;opSimpNac&gt;3&lt;/opSimpNac&gt;  (3=Simples Nacional)
+      &lt;regApTribSN&gt;1&lt;/regApTribSN&gt;
+      &lt;cLocPrestacao&gt;4106902&lt;/cLocPrestacao&gt;  (IBGE Curitiba)
+    &lt;/ideDPS&gt;
+    &lt;emit&gt;
+      &lt;CNPJ&gt;63820783000170&lt;/CNPJ&gt;
+      &lt;IM&gt;080212854094&lt;/IM&gt;
+      &lt;xNome&gt;NYTRO LTDA&lt;/xNome&gt;
+      &lt;enderNac&gt;
+        &lt;xLgr&gt;RUA BOM JESUS&lt;/xLgr&gt;  &lt;nro&gt;212&lt;/nro&gt;
+        &lt;xBairro&gt;JUVEVE&lt;/xBairro&gt;  &lt;CEP&gt;80035010&lt;/CEP&gt;
+        &lt;cMun&gt;4106902&lt;/cMun&gt;  (IBGE)
+      &lt;/enderNac&gt;
+      &lt;email&gt;comercial@nytro.com.br&lt;/email&gt;
+    &lt;/emit&gt;
+    &lt;toma&gt;  (dados do tomador)
+    &lt;serv&gt;
+      &lt;cTribNac&gt;080201&lt;/cTribNac&gt;
+      &lt;cNBS&gt;122051900&lt;/cNBS&gt;
+      &lt;xDescServ&gt;Descricao do servico&lt;/xDescServ&gt;
+    &lt;/serv&gt;
+    &lt;valores&gt;
+      &lt;vServ&gt;3500.00&lt;/vServ&gt;
+      &lt;vDed&gt;0.00&lt;/vDed&gt;
+      &lt;vDescIncond&gt;0.00&lt;/vDescIncond&gt;
+      &lt;vDescCond&gt;0.00&lt;/vDescCond&gt;
+      &lt;tribISSQN&gt;
+        &lt;tpRetISSQN&gt;1&lt;/tpRetISSQN&gt;  (1=Nao retido)
+        &lt;cLocIncid&gt;4106902&lt;/cLocIncid&gt;
+      &lt;/tribISSQN&gt;
+      &lt;pAliq&gt;5.00&lt;/pAliq&gt;
+      &lt;vISSQN&gt;0.00&lt;/vISSQN&gt;  (Simples Nacional: ST)
+    &lt;/valores&gt;
+  &lt;/infDPS&gt;
+  &lt;Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"&gt;...&lt;/Signature&gt;
+&lt;/DPS&gt;</pre>
+          </div>
+        </section>
+
+        <!-- XML Cancelamento -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Estrutura do XML Cancelamento (pedRegEvento v1.01)</h3>
+          <div class="doc-body">
+            <pre class="doc-code">&lt;pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"&gt;
+  &lt;infPedReg Id="PRE41069022...41101101"&gt;  (59 chars: PRE + chave50 + evento6)
+    &lt;tpAmb&gt;1&lt;/tpAmb&gt;
+    &lt;verAplic&gt;nfse-nytro_1.0.0&lt;/verAplic&gt;
+    &lt;dhEvento&gt;2026-08-31T12:09:34-03:00&lt;/dhEvento&gt;
+    &lt;CNPJAutor&gt;63820783000170&lt;/CNPJAutor&gt;
+    &lt;chNFSe&gt;41069022...&lt;/chNFSe&gt;  (50 digitos)
+    &lt;e101101&gt;
+      &lt;xDesc&gt;Cancelamento de NFS-e&lt;/xDesc&gt;  (texto EXATO obrigatorio)
+      &lt;cMotivo&gt;9&lt;/cMotivo&gt;  (1=Erro na emissao, 2=Servico nao prestado, 9=Outros)
+      &lt;xMotivo&gt;Cancelamento solicitado pelo emitente via Odoo&lt;/xMotivo&gt;  (min 15, max 255 chars)
+    &lt;/e101101&gt;
+  &lt;/infPedReg&gt;
+  &lt;Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"&gt;...&lt;/Signature&gt;
+&lt;/pedRegEvento&gt;</pre>
+          </div>
+        </section>
+
+        <!-- API Endpoints -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">API Endpoints</h3>
+          <div class="doc-body">
+            <table class="doc-table">
+              <thead><tr><th>Metodo</th><th>Rota</th><th>Descricao</th></tr></thead>
+              <tbody>
+                <tr><td>GET</td><td><code>/health</code></td><td>Health check do middleware</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/certificado</code></td><td>Upload certificado A1 (pfxBase64 + senha)</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/nfse/certificado</code></td><td>Status do certificado</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/certificado/logo</code></td><td>Upload logo Nytro (logoBase64)</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/process-pending</code></td><td>Acionar polling manualmente</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/re-attach</code></td><td>Re-anexar PDF+XML (move_id ou nfse_numero)</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/cancelar</code></td><td>Cancelar NFS-e por move_id</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/nfse/dashboard</code></td><td>Dados completos do painel</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/nfse/dashboard/:id/pdf</code></td><td>Download PDF DANFSe</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/nfse/dashboard/:id/xml</code></td><td>Download XML</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/nfse/dashboard/:id/consultar</code></td><td>Consultar NFS-e na SEFIN</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/nfse/admin/campos/status</code></td><td>Verificar campos x_nytro_*</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/admin/campos/criar</code></td><td>Criar campos ausentes</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/admin/campos/server-actions</code></td><td>Criar Server Actions</td></tr>
+                <tr><td>GET</td><td><code>/api/v1/nfse/admin/impostos/produtos</code></td><td>Listar produtos com impostos</td></tr>
+                <tr><td>POST</td><td><code>/api/v1/nfse/admin/impostos/push</code></td><td>Push impostos ao Odoo</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Erros Comuns -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Erros Comuns e Solucoes</h3>
+          <div class="doc-body">
+            <table class="doc-table">
+              <thead><tr><th>Erro</th><th>Causa</th><th>Solucao</th></tr></thead>
+              <tbody>
+                <tr><td><code>E1235</code></td><td>XML fora do esquema XSD v1.01</td><td>Verificar namespace, versao, elementos obrigatorios</td></tr>
+                <tr><td><code>E100</code></td><td>Erro geral de processamento</td><td>Verificar campos obrigatorios do DPS</td></tr>
+                <tr><td>PDF 503</td><td>Endpoint ADN suspenso (NT 008/2026)</td><td>Usar PDF gerado localmente (PDFKit Nytro)</td></tr>
+                <tr><td>Auth falhou</td><td>API Key Odoo invalida</td><td>Verificar ODOO_USER e ODOO_API_KEY no Render</td></tr>
+                <tr><td>Certificado nao encontrado</td><td>Firebase sem certificado</td><td>POST /api/v1/nfse/certificado com pfxBase64</td></tr>
+                <tr><td>Logo nao aparece</td><td>Nao foi feito upload</td><td>POST /api/v1/nfse/certificado/logo com logoBase64</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Variaveis de Ambiente -->
+        <section class="doc-section">
+          <h3 class="doc-h3" onclick="this.parentElement.classList.toggle('collapsed')">Variaveis de Ambiente (Render)</h3>
+          <div class="doc-body">
+            <table class="doc-table">
+              <thead><tr><th>Variavel</th><th>Exemplo</th><th>Descricao</th></tr></thead>
+              <tbody>
+                <tr><td><code>API_KEY</code></td><td>nytro-nfse-2026-s3cr3t-k3y</td><td>Chave de acesso ao painel</td></tr>
+                <tr><td><code>ODOO_ENABLED</code></td><td>1</td><td>Habilita integracao Odoo</td></tr>
+                <tr><td><code>ODOO_URL</code></td><td>https://empresa.odoo.com</td><td>URL do Odoo</td></tr>
+                <tr><td><code>ODOO_DB</code></td><td>empresa-production-...</td><td>Database Odoo</td></tr>
+                <tr><td><code>ODOO_USER</code></td><td>admin@empresa.com</td><td>Email de login</td></tr>
+                <tr><td><code>ODOO_API_KEY</code></td><td>abc123...</td><td>API Key do usuario</td></tr>
+                <tr><td><code>NFSE_TP_AMB</code></td><td>1</td><td>1=Producao, 2=Homologacao</td></tr>
+                <tr><td><code>NFSE_IM</code></td><td>080212854094</td><td>Inscricao Municipal</td></tr>
+                <tr><td><code>NFSE_ALIQUOTA_ISS</code></td><td>5.00</td><td>Aliquota ISS padrao (%)</td></tr>
+                <tr><td><code>FIREBASE_PROJECT_ID</code></td><td>nfsenytro</td><td>Projeto Firebase</td></tr>
+                <tr><td><code>FIREBASE_PRIVATE_KEY</code></td><td>-----BEGIN PRIVATE KEY-----</td><td>Chave privada do service account</td></tr>
+                <tr><td><code>FIREBASE_CLIENT_EMAIL</code></td><td>...@nfsenytro.iam.gserviceaccount.com</td><td>Email do service account</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Tab: Impostos -->
+  <div id="tab-impostos" class="tab-content hidden">
+    <main class="main-content">
+      <div class="doc-container">
+        <h2 class="doc-title">Configurador de Impostos</h2>
+        <p class="doc-subtitle">Configure os impostos e envie diretamente ao Odoo</p>
+
+        <!-- Config Atual -->
+        <section class="doc-section">
+          <h3 class="doc-h3">Configuracao Atual do Middleware</h3>
+          <div class="doc-body" id="impostos-config-atual">
+            <p>Carregando...</p>
+          </div>
+        </section>
+
+        <!-- Produtos -->
+        <section class="doc-section">
+          <h3 class="doc-h3">Produtos — Impostos por Produto</h3>
+          <div class="doc-body">
+            <p class="doc-hint">Selecione os produtos e configure os impostos individuais. Os valores serao salvos nos campos x_nytro_* do produto.</p>
+            <div style="margin-bottom:12px">
+              <button class="btn-primary" id="btn-carregar-produtos" style="padding:8px 16px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600">Carregar Produtos do Odoo</button>
+            </div>
+            <div id="impostos-produtos-lista"></div>
+            <div id="impostos-push-barra" style="display:none;margin-top:16px;padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+              <button class="btn-primary" id="btn-push-impostos" style="padding:10px 20px;border-radius:6px;border:none;background:#2563eb;color:#fff;cursor:pointer;font-weight:600">Enviar Impostos ao Odoo</button>
+              <span id="impostos-push-status" style="margin-left:12px;color:var(--muted)"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- IM Empresa -->
+        <section class="doc-section">
+          <h3 class="doc-h3">Inscricao Municipal da Empresa</h3>
+          <div class="doc-body">
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+              <input type="text" id="inp-im-empresa" placeholder="Ex: 080212854094" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);width:200px">
+              <button class="btn-primary" id="btn-salvar-im" style="padding:8px 16px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600">Salvar IM no Odoo</button>
+              <span id="im-salvar-status" style="color:var(--muted)"></span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Tab: Campos Odoo -->
+  <div id="tab-campos" class="tab-content hidden">
+    <main class="main-content">
+      <div class="doc-container">
+        <h2 class="doc-title">Campos & Server Actions — Odoo</h2>
+        <p class="doc-subtitle">Verifique, crie campos e server actions necessarios para o emissor NFS-e</p>
+
+        <section class="doc-section">
+          <h3 class="doc-h3">Status dos Campos x_nytro_*</h3>
+          <div class="doc-body">
+            <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-primary" id="btn-verificar-campos" style="padding:8px 16px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600">Verificar Campos</button>
+              <button class="btn-primary" id="btn-criar-campos" style="padding:8px 16px;border-radius:6px;border:none;background:#2563eb;color:#fff;cursor:pointer;font-weight:600">Criar Campos Ausentes</button>
+              <button class="btn-primary" id="btn-criar-actions" style="padding:8px 16px;border-radius:6px;border:none;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">Criar Server Actions</button>
+            </div>
+            <div id="campos-status-lista">
+              <p>Clique em "Verificar Campos" para checar quais campos x_nytro_* ja existem no Odoo.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="doc-section">
+          <h3 class="doc-h3">Server Actions Prontas</h3>
+          <div class="doc-body">
+            <p>As Server Actions abaixo sao criadas automaticamente no Odoo:</p>
+            <div class="sa-card">
+              <div class="sa-name">Nytro: Solicitar Emissao NFS-e</div>
+              <div class="sa-detail">Modelo: <code>account.move</code> | Acao: Executar codigo Python</div>
+              <pre class="doc-code">if record.state != 'posted':
+    record.action_post()
+record.x_nytro_nfse_status = 'pendente'
+record.x_nytro_nfse_erro = False
+record.x_nytro_nfse_mensagem = False</pre>
+            </div>
+            <div class="sa-card">
+              <div class="sa-name">Nytro: Solicitar Cancelamento NFS-e</div>
+              <div class="sa-detail">Modelo: <code>account.move</code> | Acao: Executar codigo Python</div>
+              <pre class="doc-code">if record.x_nytro_nfse_status == 'autorizada':
+    record.x_nytro_nfse_status = 'cancelar_solicitado'
+else:
+    raise UserWarning('Apenas NFS-e autorizadas podem ser canceladas.')</pre>
+            </div>
+            <p class="doc-hint">Apos criar, adicione os botoes na view de fatura manualmente ou via vista herdada (inherit view).</p>
+          </div>
+        </section>
+
+        <!-- Multi-tenant -->
+        <section class="doc-section">
+          <h3 class="doc-h3">Deploy para Outro Cliente</h3>
+          <div class="doc-body">
+            <p>Para replicar o emissor NFS-e em outro cliente Odoo, siga os passos:</p>
+            <ol class="doc-steps">
+              <li>Faca o deploy deste middleware em uma nova instancia (novo repo Render ou novo servico)</li>
+              <li>Configure as variaveis de ambiente: <code>ODOO_URL</code>, <code>ODOO_DB</code>, <code>ODOO_USER</code>, <code>ODOO_API_KEY</code> do novo cliente</li>
+              <li>Configure <code>NFSE_IM</code>, <code>NFSE_CIDADE</code>, <code>NFSE_CODIGO_IBGE</code>, <code>NFSE_UF</code> conforme o municipio</li>
+              <li>Faça o upload do certificado A1 do novo cliente via <code>POST /api/v1/nfse/certificado</code></li>
+              <li>Faça o upload da logo do novo cliente via <code>POST /api/v1/nfse/certificado/logo</code></li>
+              <li>Clique em <b>"Verificar Campos"</b> nesta aba e depois <b>"Criar Campos Ausentes"</b></li>
+              <li>Clique em <b>"Criar Server Actions"</b> para gerar os botoes de emitir/cancelar</li>
+              <li>Configure os impostos na aba <b>"Impostos"</b> (aliquota, NBS, codigo tributacao)</li>
+              <li>Teste com uma fatura de homologacao (<code>NFSE_TP_AMB=2</code>)</li>
+            </ol>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
 
