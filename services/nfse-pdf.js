@@ -15,6 +15,8 @@ const PDFDocument = require('pdfkit');
 const bwipjs = require('bwip-js');
 const path = require('path');
 const fs = require('fs');
+const config = require('../config');
+const { parseNfseXml, gerarDanfse, Ambiente } = require('open-nfse');
 
 // === Carrega logo como Buffer ===
 // Prioridade: 1) variavel de env NYTRO_LOGO_URL (Render), 2) ODOO_LOGO_URL (fallback), 3) arquivo local
@@ -737,4 +739,37 @@ async function gerarPdfDanfse(nfseXml) {
   });
 }
 
-module.exports = { gerarPdfDanfse };
+/**
+ * Gera DANFSe usando a biblioteca open-nfse (PDFKit + QRCode)
+ * Segue o padrao nacional com campos obrigatorios, QR Code para consulta
+ * publica, suporte a IBS/CBS (Reforma Tributaria), etc.
+ * Esta e a ESTRATEGIA PRINCIPAL desde que a API oficial DANFSe do ADN
+ * foi suspensa em 03/08/2026 pela NT 008/2026 v1.02.
+ *
+ * @param {string} xmlNfse - XML completo da NFS-e (retornado pela SEFIN)
+ * @returns {Promise<Buffer|null>} Buffer do PDF ou null em caso de erro
+ */
+async function gerarDanfseOpenNfse(xmlNfse) {
+  try {
+    if (!xmlNfse || xmlNfse.length < 100) {
+      console.warn('[NFSE-PDF-OPENNFSE] XML vazio ou muito curto, nao e possivel gerar DANFSe.');
+      return null;
+    }
+    console.log('[NFSE-PDF-OPENNFSE] Parseando XML da NFS-e (' + xmlNfse.length + ' chars)...');
+    const nfse = parseNfseXml(xmlNfse);
+    console.log('[NFSE-PDF-OPENNFSE] XML parseado com sucesso. Chave: ' + (nfse.infNFSe?.chaveAcesso || 'n/a') + ', nNFSe: ' + (nfse.infNFSe?.nNFSe || 'n/a'));
+
+    const isProd = config.nfse.tp_amb === 1;
+    const pdfBuf = await gerarDanfse(nfse, {
+      ambiente: isProd ? Ambiente.Producao : Ambiente.ProducaoRestrita,
+    });
+    console.log('[NFSE-PDF-OPENNFSE] DANFSe gerado com sucesso via open-nfse: ' + pdfBuf.length + ' bytes');
+    return pdfBuf;
+  } catch (e) {
+    console.warn('[NFSE-PDF-OPENNFSE] Falha ao gerar DANFSe via open-nfse: ' + e.message);
+    if (e.stack) console.warn('[NFSE-PDF-OPENNFSE] Stack: ' + e.stack.split('\n').slice(0, 3).join(' | '));
+    return null;
+  }
+}
+
+module.exports = { gerarPdfDanfse, gerarDanfseOpenNfse };

@@ -15,7 +15,7 @@ const { gerarXmlDPS } = require('./nfse-xml');
 const { assinarXml } = require('./nfse-signer');
 const { enviarDPS, baixarPdfDanfse } = require('./nfse-client');
 const { carregarCertificado } = require('./firebase-cert');
-const { gerarPdfDanfse } = require('./nfse-pdf');
+const { gerarPdfDanfse, gerarDanfseOpenNfse } = require('./nfse-pdf');
 const { cancelarNfse } = require('./nfse-cancelamento');
 
 // === XML-RPC Helpers ===
@@ -365,23 +365,37 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
         let pdfBuf = null;
         let pdfOrigem = '';
 
-        // 15a. Tenta PDF oficial da SEFIN
+        // 15a. Tenta PDF oficial do ADN (suspensa em 03/08/2026 pela NT 008/2026)
         if (chaveAcesso) {
-          console.log('[NFSE-EMIT] 15a. Tentando baixar PDF oficial da SEFIN (chave=' + chaveAcesso + ')...');
+          console.log('[NFSE-EMIT] 15a. Tentando PDF oficial ADN (chave=' + chaveAcesso + ')...');
           try {
             pdfBuf = await baixarPdfDanfse(chaveAcesso, cert);
             if (pdfBuf) {
-              pdfOrigem = 'oficial_SEFIN';
-              console.log('[NFSE-EMIT] PDF oficial obtido da SEFIN: ' + pdfBuf.length + ' bytes');
+              pdfOrigem = 'oficial_ADN';
+              console.log('[NFSE-EMIT] PDF oficial obtido do ADN: ' + pdfBuf.length + ' bytes');
             }
           } catch (ePdf) {
-            console.warn('[NFSE-EMIT] PDF oficial indisponivel: ' + ePdf.message);
+            console.warn('[NFSE-EMIT] PDF oficial ADN indisponivel (NT 008/2026 suspendeu este endpoint): ' + ePdf.message);
           }
         }
 
-        // 15b. Fallback: gera PDF local com PDFKit
+        // 15b. Gera DANFSe via open-nfse (padrao nacional, ESTRATEGIA PRINCIPAL)
+        if (!pdfBuf && resultado.xmlRetorno) {
+          console.log('[NFSE-EMIT] 15b. Gerando DANFSe via open-nfse (padrao nacional)...');
+          try {
+            pdfBuf = await gerarDanfseOpenNfse(resultado.xmlRetorno);
+            if (pdfBuf) {
+              pdfOrigem = 'open-nfse';
+              console.log('[NFSE-EMIT] DANFSe open-nfse gerado: ' + pdfBuf.length + ' bytes');
+            }
+          } catch (eOpen) {
+            console.warn('[NFSE-EMIT] open-nfse falhou: ' + eOpen.message);
+          }
+        }
+
+        // 15c. Fallback: gera PDF local com PDFKit (Nytro layout)
         if (!pdfBuf) {
-          console.log('[NFSE-EMIT] 15b. Gerando PDF DANFSe localmente (PDFKit)...');
+          console.log('[NFSE-EMIT] 15c. Gerando PDF DANFSe localmente (PDFKit Nytro)...');
           try {
             pdfBuf = await gerarPdfDanfse(resultado.xmlRetorno);
             pdfOrigem = 'gerado_local';
@@ -392,12 +406,13 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
           }
         }
 
-        // 15c. Anexa o PDF ao chatter
+        // 15d. Anexa o PDF ao chatter
         if (pdfBuf && pdfBuf.length > 0) {
-          console.log('[NFSE-EMIT] 15c. Anexando PDF (' + pdfOrigem + '): ' + pdfNome + ' (' + pdfBuf.length + ' bytes)...');
+          const origemLabel = pdfOrigem === 'oficial_ADN' ? 'PDF oficial ADN' : pdfOrigem === 'open-nfse' ? 'DANFSe Nacional' : 'PDF gerado';
+          console.log('[NFSE-EMIT] 15d. Anexando PDF (' + pdfOrigem + '): ' + pdfNome + ' (' + pdfBuf.length + ' bytes)...');
           await uploadAnexo(client, db, uid, 'account.move', moveId,
             pdfNome, pdfBuf, 'application/pdf',
-            '<b>DANFSe ' + numNF + '</b> (' + (pdfOrigem === 'oficial_SEFIN' ? 'PDF oficial SEFIN' : 'PDF gerado') + ')');
+            '<b>DANFSe ' + numNF + '</b> (' + origemLabel + ')');
           console.log('[NFSE-EMIT] PDF anexado com sucesso no chatter!');
         } else {
           console.error('[NFSE-EMIT] NENHUM PDF gerado (nem oficial, nem local). Chatter tera apenas XML.');

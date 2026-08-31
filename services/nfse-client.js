@@ -287,12 +287,18 @@ async function consultarDps(idDps, cert) {
 }
 
 /**
- * Baixa o PDF oficial do DANFSe do portal nacional.
- * O endpoint correto (desde out/2025) e o ADN (Ambiente de Danfse Nacional):
+ * Tenta baixar o PDF oficial do DANFSe do ADN.
+ *
+ * AVISO IMPORTANTE (NT 008/2026 v1.02, 14/07/2026):
+ *   O endpoint de download do DANFSe no ADN foi SUSPENSO em 03/08/2026.
+ *   A responsabilidade de gerar o DANFSe passou ao emissor (NT 008/2026).
+ *   Esta funcao e mantida como tentativa futura (se o gov reativar),
+ *   mas na pratica o PDF sera sempre gerado localmente via open-nfse.
+ *
+ * Endpoints (historico):
  *   Producao:      https://adn.nfse.gov.br/danfse/{chaveAcesso}
  *   Homologacao:   https://adn.producaorestrita.nfse.gov.br/danfse/{chaveAcesso}
- * Requer mTLS com o certificado A1 do emitente.
- * Nota: o gov tem restringido este endpoint por alto consumo (pode retornar 500).
+ *   Antigo SEFIN:  https://sefin.nfse.gov.br/SefinNacional/danfse/{chaveAcesso} (501 desde 09/2025)
  *
  * @param {string} chaveAcesso - Chave de acesso da NFS-e (50 digitos)
  * @param {object} cert - Certificado A1 para mTLS
@@ -354,7 +360,8 @@ async function baixarPdfDanfse(chaveAcesso, cert) {
     }
   }
 
-  console.warn('[NFSE-CLIENT-PDF] Nenhuma URL retornou PDF oficial. O PDF sera gerado localmente (PDFKit) como fallback.');
+  console.warn('[NFSE-CLIENT-PDF] Nenhuma URL retornou PDF oficial. Isso e esperado desde 03/08/2026 (NT 008/2026 suspendeu o endpoint).');
+  console.warn('[NFSE-CLIENT-PDF] O DANFSe sera gerado localmente via open-nfse (padrao nacional) como estrategia principal.');
   return null;
 }
 
