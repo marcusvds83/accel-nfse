@@ -233,7 +233,7 @@ router.post('/admin/campos/server-actions', apiKeyAuth, async (req, res) => {
           [['name', '=', 'view_move_form'], ['model', '=', 'account.move']],
         ], { limit: 1 });
         if (formViewId.length) {
-          const ctxXml = """<?xml version="1.0"?>\n<data>\n  <xpath expr="//div[@name='button_box']" position="inside">\n    <button name="%(action_nytro_emitir_nfse)d" type="action" icon="fa-file-text-o" class="oe_stat_button" attrs="{'invisible': [('x_nytro_nfse_status', 'not in', [False, 'erro', 'cancelada'])]}"/>\n    <button name="%(action_nytro_cancelar_nfse)d" type="action" icon="fa-times-circle" class="oe_stat_button" attrs="{'invisible': [('x_nytro_nfse_status', '!=', 'autorizada')]}"/>\n  </xpath>\n</data>""";
+          const ctxXml = `<?xml version="1.0"?>\n<data>\n  <xpath expr="//div[@name='button_box']" position="inside">\n    <button name="%(action_nytro_emitir_nfse)d" type="action" icon="fa-file-text-o" class="oe_stat_button" attrs="{'invisible': [('x_nytro_nfse_status', 'not in', [False, 'erro', 'cancelada'])]}"/>\n    <button name="%(action_nytro_cancelar_nfse)d" type="action" icon="fa-times-circle" class="oe_stat_button" attrs="{'invisible': [('x_nytro_nfse_status', '!=', 'autorizada')]}"/>\n  </xpath>\n</data>`;
           ctxResult = { status: 'xml_gerado_para_inserir', view_base: formViewId[0] };
         }
       } else {
