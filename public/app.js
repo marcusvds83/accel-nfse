@@ -553,16 +553,120 @@
       const r = await apiFetch('/api/v1/nfse/admin/docs');
       const d = await r.json();
       const c = d.config || {};
+      const ibs = c.ibs_cbs || {};
       $('#impostos-config-atual').innerHTML =
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">' +
         [['Cidade', c.cidade], ['UF', c.uf], ['IBGE', c.codigo_ibge], ['Ambiente', d.ambiente],
          ['ISS %', c.aliquota_iss], ['C. Trib.', c.c_trib_nac], ['NBS', c.c_nbs],
          ['Simples Nac', c.op_simp_nac], ['Carga Trib %', c.p_tot_trib_sn], ['Serie', c.serie],
-         ['Ver. App', c.ver_aplic]].map(([k,v]) =>
-          '<div style="padding:8px;background:var(--bg-input);border-radius:6px;border:1px solid var(--border)"><div style="color:var(--text-muted);font-size:0.7rem">' + k + '</div><div style="color:var(--text-primary);font-weight:600;font-size:0.85rem">' + (v || '--') + '</div></div>'
-        ).join('') + '</div>';
+         ['Ver. App', c.ver_aplic],
+         ['CINOP', ibs.cinop], ['CST IBS', ibs.cst_ibs], ['CST CBS', ibs.cst_cbs],
+         ['pIBS %', ibs.pIBS], ['pCBS %', ibs.pCBS], ['IBS/CBS', ibs.habilitado ? 'ATIVO' : 'DESATIVADO']
+        ].map(function(pair) {
+          var k = pair[0], v = pair[1];
+          var highlight = (k === 'IBS/CBS' && v === 'ATIVO') ? 'border-color:var(--accent)' : '';
+          return '<div style="padding:8px;background:var(--bg-input);border-radius:6px;border:1px solid var(--border);' + highlight + '"><div style="color:var(--text-muted);font-size:0.7rem">' + k + '</div><div style="color:var(--text-primary);font-weight:600;font-size:0.85rem">' + (v || '--') + '</div></div>';
+        }).join('') + '</div>';
     } catch (e) { $('#impostos-config-atual').innerHTML = '<p style="color:var(--danger)">Erro ao carregar</p>'; }
+
+    // Carrega IBS/CBS
+    loadIbsCbsConfig();
   }
+
+  // --- IBS/CBS Config ---
+  function loadIbsCbsConfig() {
+    apiFetch('/api/v1/nfse/admin/tributacao')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (!d.sucesso) return;
+        var ibs = d.ibs_cbs || {};
+        $('#ibs-cbs-habilitado').checked = ibs.habilitado !== false;
+        $('#trib-cinop').value = ibs.cinop || '01';
+        $('#trib-cclass').value = ibs.cClassTrib || '01';
+        $('#trib-cst-ibs').value = ibs.cst_ibs || '91';
+        $('#trib-cst-cbs').value = ibs.cst_cbs || '91';
+        $('#trib-pibs').value = ibs.pIBS || '0.00';
+        $('#trib-pcbs').value = ibs.pCBS || '0.00';
+        updateIbsCbsPreview(ibs);
+        $('#ibs-cbs-status').textContent = 'Configuracao carregada';
+        $('#ibs-cbs-status').style.color = 'var(--accent)';
+      })
+      .catch(function() { /* silencioso */ });
+  }
+
+  function updateIbsCbsPreview(ibs) {
+    var vBC = '1000.00'; // exemplo
+    var vIBS = (Number(vBC) * Number(ibs.pIBS || 0) / 100).toFixed(2);
+    var vCBS = (Number(vBC) * Number(ibs.pCBS || 0) / 100).toFixed(2);
+    var xml =
+      '&lt;IBSCBS&gt;\n' +
+      '  &lt;CINOP&gt;' + (ibs.cinop || '01') + '&lt;/CINOP&gt;\n' +
+      '  &lt;cClassTrib&gt;' + (ibs.cClassTrib || '01') + '&lt;/cClassTrib&gt;\n' +
+      '  &lt;IBS&gt;\n' +
+      '    &lt;CST&gt;' + (ibs.cst_ibs || '91') + '&lt;/CST&gt;\n' +
+      '    &lt;vBCIBS&gt;' + vBC + '&lt;/vBCIBS&gt;\n' +
+      '    &lt;pIBS&gt;' + Number(ibs.pIBS || 0).toFixed(2) + '&lt;/pIBS&gt;\n' +
+      '    &lt;vIBS&gt;' + vIBS + '&lt;/vIBS&gt;\n' +
+      '  &lt;/IBS&gt;\n' +
+      '  &lt;CBS&gt;\n' +
+      '    &lt;CST&gt;' + (ibs.cst_cbs || '91') + '&lt;/CST&gt;\n' +
+      '    &lt;vBCcbs&gt;' + vBC + '&lt;/vBCcbs&gt;\n' +
+      '    &lt;pCBS&gt;' + Number(ibs.pCBS || 0).toFixed(2) + '&lt;/pCBS&gt;\n' +
+      '    &lt;vCBS&gt;' + vCBS + '&lt;/vCBS&gt;\n' +
+      '  &lt;/CBS&gt;\n' +
+      '&lt;/IBSCBS&gt;';
+    $('#ibs-cbs-xml-preview').textContent = xml;
+  }
+
+  // Atualiza preview ao mudar qualquer campo
+  ['trib-cinop','trib-cclass','trib-cst-ibs','trib-cst-cbs','trib-pibs','trib-pcbs','ibs-cbs-habilitado'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', function() {
+      updateIbsCbsPreview({
+        cinop: $('#trib-cinop').value,
+        cClassTrib: $('#trib-cclass').value,
+        cst_ibs: $('#trib-cst-ibs').value,
+        cst_cbs: $('#trib-cst-cbs').value,
+        pIBS: $('#trib-pibs').value,
+        pCBS: $('#trib-pcbs').value,
+      });
+    });
+  });
+
+  // Salvar IBS/CBS
+  $('#btn-salvar-trib').addEventListener('click', async function() {
+    var btn = $('#btn-salvar-trib'); btn.disabled = true; btn.textContent = 'Salvando...';
+    var status = $('#trib-salvar-status'); status.textContent = '';
+    var payload = {
+      habilitado: $('#ibs-cbs-habilitado').checked,
+      cinop: $('#trib-cinop').value,
+      cClassTrib: $('#trib-cclass').value,
+      cst_ibs: $('#trib-cst-ibs').value,
+      cst_cbs: $('#trib-cst-cbs').value,
+      pIBS: parseFloat($('#trib-pibs').value) || 0,
+      pCBS: parseFloat($('#trib-pcbs').value) || 0,
+    };
+    try {
+      var r = await fetch('/api/v1/nfse/admin/tributacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
+        body: JSON.stringify(payload),
+      });
+      var d = await r.json();
+      if (d.sucesso) {
+        status.textContent = 'Salvo! Proxima emissao ja usara estes valores.';
+        status.style.color = 'var(--accent)';
+        // Atualiza preview
+        updateIbsCbsPreview(payload);
+        // Atualiza o card de config acima
+        loadImpostosConfig();
+      } else {
+        status.textContent = 'Erro: ' + (d.erro || '');
+        status.style.color = 'var(--danger)';
+      }
+    } catch (e) { status.textContent = 'Erro: ' + e.message; status.style.color = 'var(--danger)'; }
+    btn.disabled = false; btn.textContent = 'Salvar Configuracao IBS/CBS';
+  });
 
   // Load produtos
   $('#btn-carregar-produtos').addEventListener('click', async () => {

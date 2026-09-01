@@ -14,6 +14,9 @@
  *   valores (TCInfoValores),
  *   [IBSCBS]
  *
+ * TCIBSCBS (NT 004/2025 v2.0 — obrigatorios desde 01/01/2026):
+ *   CINOP, cClassTrib, IBS { CST, vBCIBS, pIBS, vIBS }, CBS { CST, vBCcbs, pCBS, vCBS }
+ *
  * TCInfoPrestador ordem:
  *   CNPJ/CPF, [CAEPF], [IM], [xNome], [end], [fone], [email], regTrib
  *
@@ -27,6 +30,7 @@
  */
 
 const config = require('../config');
+const { getIbsCbsConfig } = require('./trib-config');
 
 const NS = 'http://www.sped.fazenda.gov.br/nfse';
 
@@ -233,6 +237,39 @@ async function gerarXmlDPS(dados) {
   const tpRetISSQN = firstProduct.x_nytro_iss_retido === true ? '2' : '1';
   const pTotTribSN = fmtValor(c.p_tot_trib_sn);
 
+  // --- IBS/CBS (NT 004/2025 v2.0) ---
+  const ibsCbs = getIbsCbsConfig();
+  let ibsCbsXml = '';
+  if (ibsCbs.habilitado) {
+    // vBC = valor do servico (base de calculo)
+    const vBCIBS = vServ;
+    const vBCcbs = vServ;
+    // Calcula valores: vIBS = vBC * pIBS / 100
+    const vIBS = fmtValor(Number(vBCIBS) * ibsCbs.pIBS / 100);
+    const vCBS = fmtValor(Number(vBCcbs) * ibsCbs.pCBS / 100);
+
+    ibsCbsXml = `
+    <IBSCBS>
+      <CINOP>${escXml(ibsCbs.cinop)}</CINOP>
+      <cClassTrib>${escXml(ibsCbs.cClassTrib)}</cClassTrib>
+      <IBS>
+        <CST>${escXml(ibsCbs.cst_ibs)}</CST>
+        <vBCIBS>${vBCIBS}</vBCIBS>
+        <pIBS>${fmtValor(ibsCbs.pIBS)}</pIBS>
+        <vIBS>${vIBS}</vIBS>
+      </IBS>
+      <CBS>
+        <CST>${escXml(ibsCbs.cst_cbs)}</CST>
+        <vBCcbs>${vBCcbs}</vBCcbs>
+        <pCBS>${fmtValor(ibsCbs.pCBS)}</pCBS>
+        <vCBS>${vCBS}</vCBS>
+      </CBS>
+    </IBSCBS>`;
+    console.log('[NFSE-XML] IBS/CBS: CINOP=' + ibsCbs.cinop + ' CST_ibs=' + ibsCbs.cst_ibs + ' CST_cbs=' + ibsCbs.cst_cbs + ' pIBS=' + ibsCbs.pIBS + '% pCBS=' + ibsCbs.pCBS + '% vIBS=' + vIBS + ' vCBS=' + vCBS);
+  } else {
+    console.log('[NFSE-XML] IBS/CBS desabilitado via admin');
+  }
+
   // --- Monta o XML conforme XSD ---
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <DPS versao="${c.versao}" xmlns="${NS}">
@@ -280,7 +317,7 @@ async function gerarXmlDPS(dados) {
           <pTotTribSN>${pTotTribSN}</pTotTribSN>
         </totTrib>
       </trib>
-    </valores>
+    </valores>${ibsCbsXml}
   </infDPS>
 </DPS>`;
 

@@ -450,6 +450,102 @@
             </div>
           </div>
         </section>
+
+        <!-- IBS/CBS (NT 004/2025 v2.0) -->
+        <section class="doc-section">
+          <h3 class="doc-h3" style="display:flex;align-items:center;gap:8px">
+            IBS / CBS
+            <span style="font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(234,179,8,0.15);color:#eab308;font-weight:600">NT 004/2025</span>
+            <span id="ibs-cbs-badge" style="font-size:0.65rem;padding:2px 8px;border-radius:10px;background:rgba(16,185,129,0.15);color:var(--accent);font-weight:600">OBG desde 01/01/2026</span>
+          </h3>
+          <div class="doc-body">
+            <p class="doc-hint" style="margin-bottom:14px">Campos obrigatorios na NFS-e Nacional desde 01/01/2026 (NT 004/2025 v2.0). Periodo de transicao 2026-2032: ISS+IBS coexistem, PIS/COFINS+CBS coexistem. Altere aqui sem precisar de novo deploy.</p>
+
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;color:var(--fg)">
+                <input type="checkbox" id="ibs-cbs-habilitado" checked style="width:18px;height:18px;accent-color:var(--accent)">
+                Incluir IBS/CBS no XML
+              </label>
+              <span id="ibs-cbs-status" style="color:var(--muted);font-size:0.8rem"></span>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px" id="ibs-cbs-form">
+              <!-- CINOP -->
+              <div>
+                <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">CINOP — Natureza da Operacao</label>
+                <select id="trib-cinop" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);font-size:0.85rem">
+                  <option value="01">01 — Prestacao de servicos</option>
+                  <option value="02">02 — Venda de mercadorias</option>
+                  <option value="03">03 — Venda de mercadorias com servicos</option>
+                  <option value="04">04 — Servicos com fornecimento de mercadorias</option>
+                </select>
+              </div>
+              <!-- cClassTrib -->
+              <div>
+                <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">cClassTrib — Classificacao Tributaria</label>
+                <select id="trib-cclass" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);font-size:0.85rem">
+                  <option value="01">01 — Contribuinte</option>
+                  <option value="02">02 — Nao contribuinte</option>
+                </select>
+              </div>
+              <!-- CST IBS -->
+              <div>
+                <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">CST — IBS (Codigo Situacao Tributaria)</label>
+                <select id="trib-cst-ibs" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);font-size:0.85rem">
+                  <option value="00">00 — Nao tributada</option>
+                  <option value="10">10 — Isenta</option>
+                  <option value="20">20 — Nao incidencia</option>
+                  <option value="30">30 — Suspensa</option>
+                  <option value="40">40 — Substituicao tributaria</option>
+                  <option value="50">50 — Diferimento</option>
+                  <option value="60">60 — Cobranca anterior por subst.</option>
+                  <option value="70">70 — Com reducao de base de calculo</option>
+                  <option value="90">90 — Outras</option>
+                  <option value="91" selected>91 — Trib. aliquota basica (SN)</option>
+                  <option value="99">99 — Outras</option>
+                </select>
+              </div>
+              <!-- CST CBS -->
+              <div>
+                <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">CST — CBS (Codigo Situacao Tributaria)</label>
+                <select id="trib-cst-cbs" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);font-size:0.85rem">
+                  <option value="00">00 — Nao tributada</option>
+                  <option value="10">10 — Isenta</option>
+                  <option value="20">20 — Nao incidencia</option>
+                  <option value="30">30 — Suspensa</option>
+                  <option value="40">40 — Substituicao tributaria</option>
+                  <option value="50">50 — Diferimento</option>
+                  <option value="60">60 — Cobranca anterior por subst.</option>
+                  <option value="70">70 — Com reducao de base de calculo</option>
+                  <option value="90">90 — Outras</option>
+                  <option value="91" selected>91 — Trib. aliquota basica (SN)</option>
+                  <option value="99">99 — Outras</option>
+                </select>
+              </div>
+              <!-- pIBS -->
+              <div>
+                <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">pIBS — Aliquota IBS (%)</label>
+                <input type="number" step="0.01" min="0" max="100" id="trib-pibs" value="0.00" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);font-size:0.85rem" placeholder="0.00">
+              </div>
+              <!-- pCBS -->
+              <div>
+                <label style="font-size:0.75rem;color:var(--text-muted);display:block;margin-bottom:4px">pCBS — Aliquota CBS (%)</label>
+                <input type="number" step="0.01" min="0" max="100" id="trib-pcbs" value="0.00" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);font-size:0.85rem" placeholder="0.00">
+              </div>
+            </div>
+
+            <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <button class="btn-primary" id="btn-salvar-trib" style="padding:10px 24px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-weight:600;font-size:0.85rem">Salvar Configuracao IBS/CBS</button>
+              <span id="trib-salvar-status" style="font-size:0.82rem"></span>
+            </div>
+
+            <!-- Preview do XML gerado -->
+            <details style="margin-top:16px">
+              <summary style="cursor:pointer;color:var(--text-secondary);font-size:0.82rem;font-weight:600">Preview do bloco XML IBS/CBS gerado</summary>
+              <pre id="ibs-cbs-xml-preview" class="doc-code" style="margin-top:8px;font-size:0.78rem;max-height:200px;overflow:auto">Carregando...</pre>
+            </details>
+          </div>
+        </section>
       </div>
     </main>
   </div>

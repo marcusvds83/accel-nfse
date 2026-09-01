@@ -12,6 +12,7 @@ const express = require('express');
 const router = express.Router();
 const config = require('../config');
 const xmlrpc = require('xmlrpc');
+const { getIbsCbsConfig, saveIbsCbsConfig, getMeta } = require('../services/trib-config');
 
 // === Auth ===
 function apiKeyAuth(req, res, next) {
@@ -367,6 +368,7 @@ router.get('/admin/impostos/produtos', apiKeyAuth, async (req, res) => {
 // ==========================================================
 
 router.get('/admin/docs', apiKeyAuth, async (req, res) => {
+  const ibsCbs = getIbsCbsConfig();
   res.json({
     versao: '1.01',
     ambiente: config.nfse.tp_amb === 1 ? 'Producao' : 'Homologacao',
@@ -383,8 +385,42 @@ router.get('/admin/docs', apiKeyAuth, async (req, res) => {
       serie: config.nfse.serie,
       sefin_producao: config.sefin.producao,
       sefin_homologacao: config.sefin.homologacao,
+      ibs_cbs: ibsCbs,
     },
   });
+});
+
+// ==========================================================
+// 4. IBS/CBS — Configuracao Tributaria (NT 004/2025 v2.0)
+// ==========================================================
+
+// GET — Ler config IBS/CBS atual
+router.get('/admin/tributacao', apiKeyAuth, async (req, res) => {
+  try {
+    const ibsCbs = getIbsCbsConfig();
+    const meta = getMeta();
+    res.json({
+      sucesso: true,
+      ibs_cbs: ibsCbs,
+      meta: meta,
+    });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+});
+
+// POST — Salvar config IBS/CBS
+router.post('/admin/tributacao', apiKeyAuth, async (req, res) => {
+  try {
+    const resultado = saveIbsCbsConfig(req.body);
+    res.json({
+      sucesso: true,
+      ibs_cbs: resultado,
+      mensagem: 'Configuracao IBS/CBS salva. Nova emissao ja usara estes valores.',
+    });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
 });
 
 module.exports = router;
