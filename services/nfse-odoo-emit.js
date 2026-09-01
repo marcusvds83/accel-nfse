@@ -188,7 +188,7 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
   const company = companies[0];
 
   // Extrai CNPJ da empresa (fallback: CNPJ Nytro da config)
-  company._cnpj = extrairCnpj(company, campoCnpjCompany, '63820783000170');
+  company._cnpj = extrairCnpj(company, campoCnpjCompany, '06696225000100');
 
   // Extrai cidade da empresa (city || city_id || config)
   if (company.city_id) {

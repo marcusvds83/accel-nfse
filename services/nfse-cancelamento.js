@@ -97,7 +97,7 @@ async function cancelarViaEvento(params, cert) {
 
   const dhEvento = formatDhEvento();
   const tpAmb = String(config.nfse.tp_amb);
-  const verAplic = config.nfse.ver_aplic || 'nfse-nytro_1.0.0';
+  const verAplic = config.nfse.ver_aplic || 'accel-nfse_1.0.0';
 
   // CNPJ do prestador/autor (apenas digitos)
   const cnpjAutor = (cnpjPrest || '').replace(/[^0-9]/g, '');

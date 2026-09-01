@@ -39,9 +39,9 @@ async function ensureLogo() {
   if (logoLoaded) return LOGO_BUF;
   logoLoaded = true;
 
-  // 1) Arquivo local (assets/logo-nytro.png) — vem via git deploy
+  // 1) Arquivo local (assets/logo-accel.jpg) — vem via git deploy
   try {
-    const logoPath = path.join(__dirname, '..', 'assets', 'logo-nytro.png');
+    const logoPath = path.join(__dirname, '..', 'assets', 'logo-accel.jpg');
     if (fs.existsSync(logoPath)) {
       LOGO_BUF = fs.readFileSync(logoPath);
       console.log('[NFSE-PDF] Logo carregada do arquivo local: ' + LOGO_BUF.length + ' bytes');

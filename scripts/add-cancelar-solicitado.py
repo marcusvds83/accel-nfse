@@ -2,7 +2,7 @@ import xmlrpc.client
 
 url = 'https://luisfernandonytro-nytro.odoo.com'
 db = 'luisfernandonytro-nytro-producao-nytro-28615541'
-user = 'luis.justus@nytro.com.br'
+user = 'contato@accel-br.com'
 key = 'cec5c5c71b21cab1d2bbd58403d0b5eb5301f0c0'
 
 common = xmlrpc.client.ServerProxy(f'{url}/xmlrpc/2/common')

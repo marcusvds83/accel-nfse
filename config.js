@@ -29,7 +29,7 @@ module.exports = {
     serie: (() => { const s = process.env.NFSE_SERIE || '1'; const n = parseInt(s, 10); return (n >= 1 && n <= 49999) ? s : '1'; })(),
     versao: process.env.NFSE_VERSAO || '1.01',
     ver_aplic: process.env.NFSE_VER_APLIC || 'accel-nfse_1.0.0',
-    inscricao_municipal: process.env.NFSE_IM || '080212854094',
+    inscricao_municipal: process.env.NFSE_IM || '170110079908',
     // Regime tributario (Simples Nacional)
     op_simp_nac: parseInt(process.env.NFSE_OP_SIMP_NAC || '3', 10), // 3=Simples Nacional
     reg_ap_trib_sn: parseInt(process.env.NFSE_REG_AP_TRIB_SN || '1', 10),

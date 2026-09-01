@@ -5,7 +5,7 @@ import xmlrpc.client
 
 URL = 'https://luisfernandonytro-nytro.odoo.com'
 DB = 'luisfernandonytro-nytro-producao-nytro-28615541'
-USER = 'luis.justus@nytro.com.br'
+USER = 'contato@accel-br.com'
 API_KEY = 'cec5c5c71b21cab1d2bbd58403d0b5eb5301f0c0'
 
 common = xmlrpc.client.ServerProxy(f'{URL}/xmlrpc/2/common')
@@ -41,10 +41,10 @@ for c in companies:
 
 # 3. Atualiza IM e reseta numeracao
 models.execute_kw(DB, uid, API_KEY, 'res.company', 'write', [[1], {
-    'x_nytro_nfse_dados_prestador_im': '080212854094',
+    'x_nytro_nfse_dados_prestador_im': '170110079908',
     'x_nytro_nfse_numero': 0,
 }])
-print('\nAtualizado: IM=080212854094, nDPS resetado para 0 (proximo sera 1)')
+print('\nAtualizado: IM=170110079908, nDPS resetado para 0 (proximo sera 1)')
 
 # 4. Verifica
 updated = models.execute_kw(DB, uid, API_KEY, 'res.company', 'read', [[1]],
