@@ -217,7 +217,7 @@ async function setDoc(collection, docId, data) {
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: 'firestore.googleapis.com',
-      path: path + '?fieldMask=',  // PATCH cria/atualiza
+      path: path,  // PATCH cria/atualiza documento inteiro
       method: 'PATCH',
       headers: {
         'Authorization': 'Bearer ' + token,
