@@ -237,35 +237,42 @@ async function gerarXmlDPS(dados) {
   const tpRetISSQN = firstProduct.x_nytro_iss_retido === true ? '2' : '1';
   const pTotTribSN = fmtValor(c.p_tot_trib_sn);
 
-  // --- IBS/CBS (NT 004/2025 v2.0) ---
+  // --- IBS/CBS (NT 004/2025 v2.0 - XSD v1.01 de 09/02/2026) ---
+  // Estrutura correta conforme tiposComplexos_v1.01.xsd tipo TCRTCInfoIBSCBS:
+  //   IBSCBS > finNFSe, [indFinal], cIndOp, [tpOper], [gRefNFSe], [tpEnteGov], indDest, [dest], [imovel], valores > trib > gIBSCBS > CST, cClassTrib, [cCredPres], [gTribRegular], [gDif]
+  // Os valores de IBS/CBS (vBCIBS, pIBS, vIBS, etc.) NAO sao informados pelo contribuinte na DPS
+  // - sao calculados pela SEFIN na NFS-e autorizada.
   const ibsCbs = getIbsCbsConfig();
   let ibsCbsXml = '';
   if (ibsCbs.habilitado) {
-    // vBC = valor do servico (base de calculo)
-    const vBCIBS = vServ;
-    const vBCcbs = vServ;
-    // Calcula valores: vIBS = vBC * pIBS / 100
-    const vIBS = fmtValor(Number(vBCIBS) * ibsCbs.pIBS / 100);
-    const vCBS = fmtValor(Number(vBCcbs) * ibsCbs.pCBS / 100);
+    // Mapeia valores antigos do painel admin para o novo formato XSD v1.01:
+    // - CINOP (1-2 digitos) -> cIndOp (6 digitos, default 110101 = prestacao presencial)
+    // - cClassTrib (1-2 digitos) -> cClassTrib (6 digitos, default 000001)
+    // - CST_ibs/CST_cbs (2 digitos) -> CST unico (3 digitos, default 000)
+    let cIndOp = String(ibsCbs.cinop || '').replace(/\D/g, '');
+    if (cIndOp.length !== 6) cIndOp = '110101'; // default: prestacao de servico presencial
+    let cClassTrib = String(ibsCbs.cClassTrib || '').replace(/\D/g, '');
+    if (cClassTrib.length !== 6) cClassTrib = '000001'; // default
+    let cstIbsCbs = String(ibsCbs.cst_ibs || ibsCbs.cst_cbs || '').replace(/\D/g, '');
+    if (cstIbsCbs.length !== 3) cstIbsCbs = '000'; // default: tributacao regular
 
+    // finNFSe: 0=NFS-e regular (unico valor valido no XSD v1.01 atual)
+    // indDest: 0=destinatario e o proprio tomador (default para prestacao de servico)
     ibsCbsXml = `
     <IBSCBS>
-      <CINOP>${escXml(ibsCbs.cinop)}</CINOP>
-      <cClassTrib>${escXml(ibsCbs.cClassTrib)}</cClassTrib>
-      <IBS>
-        <CST>${escXml(ibsCbs.cst_ibs)}</CST>
-        <vBCIBS>${vBCIBS}</vBCIBS>
-        <pIBS>${fmtValor(ibsCbs.pIBS)}</pIBS>
-        <vIBS>${vIBS}</vIBS>
-      </IBS>
-      <CBS>
-        <CST>${escXml(ibsCbs.cst_cbs)}</CST>
-        <vBCcbs>${vBCcbs}</vBCcbs>
-        <pCBS>${fmtValor(ibsCbs.pCBS)}</pCBS>
-        <vCBS>${vCBS}</vCBS>
-      </CBS>
+      <finNFSe>0</finNFSe>
+      <cIndOp>${cIndOp}</cIndOp>
+      <indDest>0</indDest>
+      <valores>
+        <trib>
+          <gIBSCBS>
+            <CST>${cstIbsCbs}</CST>
+            <cClassTrib>${cClassTrib}</cClassTrib>
+          </gIBSCBS>
+        </trib>
+      </valores>
     </IBSCBS>`;
-    console.log('[NFSE-XML] IBS/CBS: CINOP=' + ibsCbs.cinop + ' CST_ibs=' + ibsCbs.cst_ibs + ' CST_cbs=' + ibsCbs.cst_cbs + ' pIBS=' + ibsCbs.pIBS + '% pCBS=' + ibsCbs.pCBS + '% vIBS=' + vIBS + ' vCBS=' + vCBS);
+    console.log('[NFSE-XML] IBS/CBS (XSD v1.01): finNFSe=0 cIndOp=' + cIndOp + ' indDest=0 CST=' + cstIbsCbs + ' cClassTrib=' + cClassTrib);
   } else {
     console.log('[NFSE-XML] IBS/CBS desabilitado via admin');
   }
