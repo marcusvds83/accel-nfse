@@ -717,8 +717,54 @@
     try {
       const r = await fetch('/api/v1/nfse/admin/campos/server-actions', { method: 'POST', headers: { 'X-Api-Key': API_KEY } });
       const d = await r.json();
-      const lines = (d.acoes || []).map(a => a.nome + ': ' + a.status + (a.id ? ' (id=' + a.id + ')' : '') + (a.erro ? ' — ' + a.erro : '')).join('\n');
-      alert(lines + '\n\nContexto: ' + JSON.stringify(d.contexto));
+
+      if (d.saas_restriction) {
+        // Odoo SaaS bloqueou - mostra modal com codigo pronto pra copiar
+        const resumo = (d.acoes || []).map(a => {
+          const statusIcon = a.status === 'criada' ? 'OK' : (a.status === 'atualizada' ? 'OK' : 'manual');
+          return '[' + statusIcon + '] ' + a.nome + (a.id ? ' (id=' + a.id + ')' : '') + (a.erro ? ' — ' + a.erro.substring(0, 100) : '');
+        }).join('\n');
+
+        const html = '<div style="font-family:Inter,sans-serif;line-height:1.5">' +
+          '<div style="background:rgba(234,179,8,0.1);border:1px solid #eab308;border-radius:8px;padding:12px;margin-bottom:16px">' +
+            '<strong style="color:#eab308">Atencao:</strong> Odoo Online (SaaS) bloqueia criacao/atualizacao de Server Actions via API (XML-RPC).<br>' +
+            'Voce precisa criar as 2 acoes manualmente no Odoo Studio e colar os codigos abaixo.' +
+          '</div>' +
+          '<div style="margin-bottom:8px;font-size:0.85rem;color:var(--text-muted)">Resumo:</div>' +
+          '<pre style="background:var(--surface);padding:8px;border-radius:6px;margin-bottom:16px;font-size:0.78rem;white-space:pre-wrap">' + esc(resumo || '(sem dados)') + '</pre>' +
+          '<h3 style="margin:0 0 4px 0;font-size:0.95rem">Passo a passo no Odoo:</h3>' +
+          '<ol style="margin:0 0 16px 16px;font-size:0.85rem;padding-left:16px">' +
+            '<li>Ative o <b>Modo Desenvolvedor</b> (icone 🐞 no canto superior direito)</li>' +
+            '<li>Va em <b>Configuracao > Tecnico > Acoes do Servidor</b></li>' +
+            '<li>Clique <b>Novo</b></li>' +
+            '<li>Preencha: <b>Nome da acao</b> = <code>Emitir NFS-e</code>, <b>Modelo</b> = <code>Fatura (account.move)</code></li>' +
+            '<li>Em <b>Acao</b> escolha <b>Executar codigo Python</b></li>' +
+            '<li>Cole o codigo abaixo no campo <b>Codigo Python</b></li>' +
+            '<li>Em <b>Vincular com</b> escolha <code>Fatura (account.move)</code> e <b>Visualizacao formulario</b></li>' +
+            '<li>Salve. Repita para <b>Cancelar NFS-e</b> com o outro codigo.</li>' +
+          '</ol>' +
+          '<div style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">' +
+            '<strong style="font-size:0.95rem">Acao 1: Emitir NFS-e</strong>' +
+            '<button onclick="navigator.clipboard.writeText(document.getElementById(&quot;sa-emitir-code&quot;).textContent).then(function(b){b.textContent=&quot;Copiado!&quot;;setTimeout(function(){b.textContent=&quot;Copiar&quot;},2000)}.bind(this))" style="padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--accent);color:#fff;cursor:pointer;font-size:0.78rem">Copiar</button>' +
+          '</div>' +
+          '<pre id="sa-emitir-code" style="background:var(--surface);padding:10px;border-radius:6px;border:1px solid var(--border);font-family:JetBrains Mono,monospace;font-size:0.75rem;overflow:auto;max-height:300px;margin-bottom:20px">' + esc(d.codigos_prontos.emitir) + '</pre>' +
+          '<div style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">' +
+            '<strong style="font-size:0.95rem">Acao 2: Cancelar NFS-e</strong>' +
+            '<button onclick="navigator.clipboard.writeText(document.getElementById(&quot;sa-cancelar-code&quot;).textContent).then(function(b){b.textContent=&quot;Copiado!&quot;;setTimeout(function(){b.textContent=&quot;Copiar&quot;},2000)}.bind(this))" style="padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--accent);color:#fff;cursor:pointer;font-size:0.78rem">Copiar</button>' +
+          '</div>' +
+          '<pre id="sa-cancelar-code" style="background:var(--surface);padding:10px;border-radius:6px;border:1px solid var(--border);font-family:JetBrains Mono,monospace;font-size:0.75rem;overflow:auto;max-height:300px">' + esc(d.codigos_prontos.cancelar) + '</pre>' +
+        '</div>';
+
+        // Reusa o modal existente (XML viewer)
+        $('#modal-title').textContent = 'Server Actions - Cole no Odoo Studio';
+        $('#modal-xml-content').innerHTML = html;
+        $('#modal-info').textContent = '';
+        $('#modal-overlay').classList.remove('hidden');
+      } else {
+        // Sucesso normal ou outro erro
+        const lines = (d.acoes || []).map(a => a.nome + ': ' + a.status + (a.id ? ' (id=' + a.id + ')' : '') + (a.erro ? ' — ' + a.erro.substring(0, 100) : '')).join('\n');
+        alert(lines + (d.mensagem_saas ? '\n\n' + d.mensagem_saas : ''));
+      }
     } catch (e) { alert('Erro: ' + e.message); }
     btn.disabled = false; btn.textContent = 'Criar Server Actions';
   });

@@ -177,6 +177,49 @@ router.post('/admin/campos/criar', apiKeyAuth, async (req, res) => {
 
 // POST — Criar Server Actions prontas
 router.post('/admin/campos/server-actions', apiKeyAuth, async (req, res) => {
+  // Codigo Python das Server Actions - sempre retornado para o usuario colar no Odoo Studio
+  // (Odoo Online SaaS bloqueia create/write de ir.actions.server com codigo via XML-RPC)
+  const codigoEmitir = `# Emitir NFS-e - Accel (integra middleware Render via polling)
+# Cole este codigo no Odoo: Configuracao > Tecnico > Acoes do Servidor > Nova
+#   Nome: Emitir NFS-e
+#   Modelo: account.move
+#   Estado: Executar codigo Python
+for rec in records:
+    if rec.state != 'posted':
+        raise UserError('A fatura deve estar confirmada (Posted) antes de emitir a NFS-e.')
+    status_atual = (rec.x_nytro_nfse_status or 'vazio')
+    if status_atual in ('pendente', 'processando', 'autorizada'):
+        raise UserError('Esta fatura ja tem NFS-e em andamento ou emitida. Status: %s' % status_atual)
+    vals = {
+        'x_nytro_nfse_status': 'pendente',
+        'x_nytro_nfse_erro': False,
+        'x_nytro_nfse_mensagem': False,
+    }
+    try:
+        rec.write(vals)
+    except Exception as e:
+        raise UserError('Erro ao marcar fatura como pendente: %s' % str(e))`;
+
+  const codigoCancelar = `# Cancelar NFS-e - Accel (integra middleware Render via polling)
+# Cole este codigo no Odoo: Configuracao > Tecnico > Acoes do Servidor > Nova
+#   Nome: Cancelar NFS-e
+#   Modelo: account.move
+#   Estado: Executar codigo Python
+for rec in records:
+    status_atual = (rec.x_nytro_nfse_status or 'vazio')
+    if status_atual not in ('autorizada',):
+        raise UserError('Apenas NFS-e autorizadas podem ser canceladas. Status atual: %s' % status_atual)
+    if not rec.x_nytro_nfse_numero:
+        raise UserError('Nenhuma NFS-e vinculada a esta fatura.')
+    vals = {
+        'x_nytro_nfse_status': 'cancelar_solicitado',
+        'x_nytro_nfse_mensagem': 'Cancelamento solicitado via Odoo. Aguardando processamento pelo middleware.',
+    }
+    try:
+        rec.write(vals)
+    except Exception as e:
+        raise UserError('Erro ao solicitar cancelamento: %s' % str(e))`;
+
   try {
     if (!config.odoo.enabled) return res.json({ erro: 'Odoo nao configurado' });
     const client = createClient();
@@ -185,68 +228,107 @@ router.post('/admin/campos/server-actions', apiKeyAuth, async (req, res) => {
 
     const acoes = [
       {
-        nome: 'Nytro: Solicitar Emissao NFS-e',
+        nome: 'Emitir NFS-e',
         model: 'account.move',
         tipo: 'code',
-        codigo: "if record.state != 'posted':\n    record.action_post()\nrecord.x_nytro_nfse_status = 'pendente'\nrecord.x_nytro_nfse_erro = False\nrecord.x_nytro_nfse_mensagem = False",
+        codigo: codigoEmitir,
       },
       {
-        nome: 'Nytro: Solicitar Cancelamento NFS-e',
+        nome: 'Cancelar NFS-e',
         model: 'account.move',
         tipo: 'code',
-        codigo: "if record.x_nytro_nfse_status == 'autorizada':\n    record.x_nytro_nfse_status = 'cancelar_solicitado'\nelse:\n    raise UserWarning('Apenas NFS-e autorizadas podem ser canceladas. Status atual: %s' % record.x_nytro_nfse_status)",
+        codigo: codigoCancelar,
       },
     ];
 
     const resultados = [];
+    let encontrouRestricaoSaaS = false;
+
     for (const acao of acoes) {
-      // Verifica se ja existe
-      const existing = await executeKw(client, db, uid, 'ir.actions.server', 'search', [
-        [['name', '=', acao.nome]],
-      ]);
+      // Busca por nome exato
+      let existing = [];
+      try {
+        existing = await executeKw(client, db, uid, 'ir.actions.server', 'search', [
+          [['name', '=', acao.nome]],
+        ]);
+      } catch (e) {
+        // Search nunca da "forbidden opcode" - se der erro aqui e outra coisa
+      }
 
       if (existing.length > 0) {
-        resultados.push({ nome: acao.nome, status: 'ja_existe', id: existing[0] });
+        // Tenta atualizar (provavelmente vai falhar com forbidden opcode)
+        try {
+          await executeKw(client, db, uid, 'ir.actions.server', 'write', [[existing[0]], {
+            state: 'code',
+            code: acao.codigo,
+          }]);
+          resultados.push({ nome: acao.nome, status: 'atualizada', id: existing[0] });
+        } catch (e) {
+          // Erro esperado em Odoo SaaS: forbidden opcode(s)
+          resultados.push({
+            nome: acao.nome,
+            status: 'manual_required',
+            id: existing[0],
+            erro: e.message,
+            codigo_python: acao.codigo,
+            instrucoes: 'Odoo Online bloqueia create/write de Server Actions com codigo via XML-RPC. Cole o codigo manualmente no Odoo Studio.',
+          });
+          if (/forbidden opcode|STORE_ATTR|ir\.actions\.server/i.test(e.message)) {
+            encontrouRestricaoSaaS = true;
+          }
+        }
         continue;
       }
 
+      // Tenta criar nova
       try {
         const id = await executeKw(client, db, uid, 'ir.actions.server', 'create', [{
           name: acao.nome,
           model_id: await getModelId(client, db, uid, acao.model),
+          binding_model_id: await getModelId(client, db, uid, acao.model),
+          binding_view_types: 'form',
           state: acao.tipo,
           code: acao.codigo,
         }]);
         resultados.push({ nome: acao.nome, status: 'criada', id });
       } catch (e) {
-        resultados.push({ nome: acao.nome, status: 'erro', erro: e.message });
-      }
-    }
-
-    // Tenta adicionar botao de contexto (apenas se o modulo existe)
-    let ctxResult = null;
-    try {
-      const irUiViewIds = await executeKw(client, db, uid, 'ir.ui.view', 'search', [
-        [['name', '=', 'view_move_form_inherited_nytro_nfse']],
-      ]);
-      if (!irUiViewIds.length) {
-        const formViewId = await executeKw(client, db, uid, 'ir.ui.view', 'search', [
-          [['name', '=', 'view_move_form'], ['model', '=', 'account.move']],
-        ], { limit: 1 });
-        if (formViewId.length) {
-          const ctxXml = `<?xml version="1.0"?>\n<data>\n  <xpath expr="//div[@name='button_box']" position="inside">\n    <button name="%(action_nytro_emitir_nfse)d" type="action" icon="fa-file-text-o" class="oe_stat_button" attrs="{'invisible': [('x_nytro_nfse_status', 'not in', [False, 'erro', 'cancelada'])]}"/>\n    <button name="%(action_nytro_cancelar_nfse)d" type="action" icon="fa-times-circle" class="oe_stat_button" attrs="{'invisible': [('x_nytro_nfse_status', '!=', 'autorizada')]}"/>\n  </xpath>\n</data>`;
-          ctxResult = { status: 'xml_gerado_para_inserir', view_base: formViewId[0] };
+        // Erro esperado em Odoo SaaS: forbidden opcode(s)
+        resultados.push({
+          nome: acao.nome,
+          status: 'manual_required',
+          erro: e.message,
+          codigo_python: acao.codigo,
+          instrucoes: 'Odoo Online bloqueia create/write de Server Actions com codigo via XML-RPC. Cole o codigo manualmente no Odoo Studio.',
+        });
+        if (/forbidden opcode|STORE_ATTR|ir\.actions\.server/i.test(e.message)) {
+          encontrouRestricaoSaaS = true;
         }
-      } else {
-        ctxResult = { status: 'view_ja_existe', id: irUiViewIds[0] };
       }
-    } catch (e) {
-      ctxResult = { status: 'erro', erro: e.message };
     }
 
-    res.json({ acoes: resultados, contexto: ctxResult });
+    res.json({
+      acoes: resultados,
+      saas_restriction: encontrouRestricaoSaaS,
+      mensagem_saas: encontrouRestricaoSaaS
+        ? 'Odoo Online bloqueia criacao/atualizacao de Server Actions via API. Cada acao abaixo tem o codigo Python pronto - abra o Odoo Studio, crie as acoes manualmente e cole o codigo.'
+        : null,
+      // Sempre envia codigos para o front-end ter tudo num lugar so
+      codigos_prontos: {
+        emitir: codigoEmitir,
+        cancelar: codigoCancelar,
+      },
+    });
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    // Erro geral - ainda retorna os codigos pra colar manualmente
+    res.status(200).json({
+      erro: err.message,
+      saas_restriction: /forbidden opcode|STORE_ATTR/i.test(err.message),
+      codigos_prontos: {
+        emitir: codigoEmitir,
+        cancelar: codigoCancelar,
+      },
+      mensagem_saas: 'Odoo Online bloqueia operacao. Use os codigos abaixo no Odoo Studio.',
+    });
   }
 });
 
