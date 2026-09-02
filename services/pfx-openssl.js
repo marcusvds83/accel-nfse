@@ -49,30 +49,40 @@ function openPfxWithOpenssl(pfxBuffer, senha) {
   fs.writeFileSync(tmp, pfxBuffer, { mode: 0o600 });
   try {
     let lastErr = null;
-    const modos = [false, true]; // moderno, depois -legacy
+    // 3 modos: moderno -> legacy -> legacy com RC2 desativado
+    // (alguns PFX ICP-Brasil precisam de -legacy para algoritmos RC2/3DES)
+    const modos = [
+      { legacy: false, desc: 'moderno' },
+      { legacy: true,  desc: 'legacy' },
+    ];
     for (let i = 0; i < modos.length; i++) {
       try {
-        const keyPem = normalizeKey(extract(tmp, senha, 'key', modos[i]));
-        const leafOut = extract(tmp, senha, 'leaf', modos[i]);
+        const keyPem = normalizeKey(extract(tmp, senha, 'key', modos[i].legacy));
+        const leafOut = extract(tmp, senha, 'leaf', modos[i].legacy);
         let certPem = pemBlocks(leafOut, 'CERTIFICATE')[0];
         let chain = [];
-        try { chain = pemBlocks(extract(tmp, senha, 'ca', modos[i]), 'CERTIFICATE'); } catch (e) { chain = []; }
+        try { chain = pemBlocks(extract(tmp, senha, 'ca', modos[i].legacy), 'CERTIFICATE'); } catch (e) { chain = []; }
         if (!certPem) certPem = chain[0];
         if (!keyPem) throw new Error('Chave privada nao encontrada no arquivo .pfx.');
         if (!certPem) throw new Error('Certificado nao encontrado no arquivo .pfx.');
         const chainPem = [certPem].concat(chain.filter(function (c) { return c !== certPem; }));
-        return { privateKeyPem: keyPem, certPem: certPem + '\n', chainPem: chainPem, legacy: modos[i] };
+        return { privateKeyPem: keyPem, certPem: certPem + '\n', chainPem: chainPem, legacy: modos[i].legacy };
       } catch (e) {
         lastErr = e;
-        const out = String((e && e.stderr) || (e && e.message) || '');
-        if (/mac verify failure|invalid password|wrong password/i.test(out)) {
-          throw new Error('Senha do certificado incorreta.');
-        }
+        // NAO aborta aqui - tenta proximo modo.
+        // So vamos declarar "senha incorreta" depois de tentar TODOS os modos.
       }
     }
-    const det = String((lastErr && lastErr.stderr) || (lastErr && lastErr.message) || 'desconhecido').trim();
-    if (/ENOENT/.test(det)) throw new Error('OpenSSL nao disponivel no servidor.');
-    throw new Error('Falha ao abrir o certificado com OpenSSL: ' + det.split('\n').slice(-3).join(' '));
+    // Tentou todos os modos e nenhum funcionou. Verifica se foi senha errada.
+    const allErrors = String((lastErr && lastErr.stderr) || (lastErr && lastErr.message) || '');
+    if (/mac verify failure|invalid password|wrong password|MAC data invalid but no salt/i.test(allErrors)) {
+      throw new Error('Senha do certificado incorreta (OpenSSL testou modos moderno e legacy).');
+    }
+    if (/ENOENT|not found|not recognized/i.test(allErrors)) {
+      throw new Error('OpenSSL nao disponivel no servidor: ' + allErrors.split('\n').slice(-2).join(' '));
+    }
+    throw new Error('Falha ao abrir o certificado com OpenSSL (modos tentados: moderno, legacy): ' +
+                    allErrors.split('\n').slice(-3).join(' '));
   } finally {
     try { fs.unlinkSync(tmp); } catch (e) { /* ignore */ }
   }

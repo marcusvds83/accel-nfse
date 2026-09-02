@@ -109,17 +109,18 @@ function openPfxForge(pfxBuffer, senha) {
 
 function openPfx(pfxBuffer, senha) {
   if (!Buffer.isBuffer(pfxBuffer) || !pfxBuffer.length) throw new Error('Arquivo de certificado invalido.');
-  // Tenta node-forge
+
+  // Tenta node-forge primeiro (rapido, mas nao suporta PFX com AES-256-GCM moderno)
+  let forgeError = null;
   try {
     return openPfxForge(pfxBuffer, senha);
   } catch (e) {
+    forgeError = e;
     const msg = String((e && e.message) || e);
-    if (/mac|password|senha/i.test(msg) && !/unsupported/i.test(msg)) {
-      throw new Error('Senha do certificado incorreta ou arquivo .pfx invalido.');
-    }
     console.warn('[FIREBASE-CERT] node-forge falhou (' + msg + '). Tentando OpenSSL...');
   }
-  // Fallback OpenSSL
+
+  // Fallback OpenSSL (suporta todos os algoritmos, inclusive PBES2/AES-256-GCM dos certificados ICP-Brasil recentes)
   try {
     const viaSsl = openPfxWithOpenssl(pfxBuffer, senha);
     return {
@@ -129,7 +130,12 @@ function openPfx(pfxBuffer, senha) {
       info: infoFromCertPem(viaSsl.certPem),
     };
   } catch (e2) {
-    throw new Error(String((e2 && e2.message) || e2));
+    const msg2 = String((e2 && e2.message) || e2);
+    // So agora, depois de OpenSSL tambem falhar, podemos dizer que a senha esta errada
+    if (/mac verify failure|invalid password|wrong password|Senha do certificado incorreta/i.test(msg2)) {
+      throw new Error('Senha do certificado incorreta (validada via OpenSSL). Verifique a senha e tente novamente.');
+    }
+    throw new Error('Falha ao abrir o certificado: ' + msg2);
   }
 }
 
