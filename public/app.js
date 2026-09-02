@@ -547,7 +547,7 @@
   }
 
   // --- Impostos Tab ---
-  let produtosCache = [];
+  // let produtosCache = []; // Removido: aba Impostos nao tem mais secao de produtos
   async function loadImpostosConfig() {
     try {
       const r = await apiFetch('/api/v1/nfse/admin/docs');
@@ -668,60 +668,6 @@
     btn.disabled = false; btn.textContent = 'Salvar Configuracao IBS/CBS';
   });
 
-  // Load produtos
-  $('#btn-carregar-produtos').addEventListener('click', async () => {
-    const btn = $('#btn-carregar-produtos'); btn.textContent = 'Carregando...'; btn.disabled = true;
-    try {
-      const r = await apiFetch('/api/v1/nfse/admin/impostos/produtos');
-      const d = await r.json();
-      if (d.erro) { alert(d.erro); return; }
-      produtosCache = d.produtos || [];
-      if (!produtosCache.length) { $('#impostos-produtos-lista').innerHTML = '<p style="color:var(--text-muted)">Nenhum produto encontrado.</p>'; return; }
-      const html = produtosCache.map(p => {
-        const x = p.x_nytro || {};
-        return '<div class="imp-produto-card" data-id="' + p.id + '">' +
-          '<div class="imp-produto-nome"><input type="checkbox" class="imp-check" data-id="' + p.id + '" checked> ' + esc(p.name) + (p.default_code ? ' (' + p.default_code + ')' : '') + ' — R$ ' + Number(p.list_price).toFixed(2) + '</div>' +
-          '<div class="imp-produto-row"><label>Cod. Trib.</label><input type="text" class="imp-ctrib" data-id="' + p.id + '" value="' + esc(x.x_nytro_codigo_tributacao || '') + '" placeholder="080201"></div>' +
-          '<div class="imp-produto-row"><label>NBS</label><input type="text" class="imp-cnbs" data-id="' + p.id + '" value="' + esc(x.x_nytro_c_nbs || '') + '" placeholder="122051900"></div>' +
-          '<div class="imp-produto-row"><label>ISS %</label><input type="number" step="0.01" class="imp-iss" data-id="' + p.id + '" value="' + (x.x_nytro_aliquota_iss || '') + '" placeholder="5.00"></div>' +
-          '<div class="imp-produto-row"><label>ISS Retido</label><select class="imp-ret" data-id="' + p.id + '"><option value="2">Nao</option><option value="1"' + (x.x_nytro_iss_retido === '1' ? ' selected' : '') + '>Sim</option></select></div>' +
-          '<div class="imp-produto-row"><label>Descricao NFSe</label><input type="text" class="imp-desc" data-id="' + p.id + '" value="' + esc(x.x_nytro_descricao_nfse || '') + '" style="width:100%" placeholder="Descricao do servico para a NFS-e"></div>' +
-          '</div>';
-      }).join('');
-      $('#impostos-produtos-lista').innerHTML = html;
-      $('#impostos-push-barra').style.display = 'block';
-    } catch (e) { alert('Erro: ' + e.message); }
-    btn.textContent = 'Carregar Produtos do Odoo'; btn.disabled = false;
-  });
-
-  // Push impostos
-  $('#btn-push-impostos').addEventListener('click', async () => {
-    const selected = [...document.querySelectorAll('.imp-check:checked')].map(c => parseInt(c.dataset.id));
-    if (!selected.length) { alert('Selecione ao menos um produto.'); return; }
-    const btn = $('#btn-push-impostos'); btn.disabled = true; btn.textContent = 'Enviando...';
-    const status = $('#impostos-push-status'); status.textContent = '';
-    try {
-      // Coleta dados de cada produto
-      const updates = selected.map(id => ({
-        id,
-        x_nytro_codigo_tributacao: document.querySelector('.imp-ctrib[data-id="' + id + '"]').value,
-        x_nytro_c_nbs: document.querySelector('.imp-cnbs[data-id="' + id + '"]').value,
-        x_nytro_aliquota_iss: document.querySelector('.imp-iss[data-id="' + id + '"]').value,
-        x_nytro_iss_retido: document.querySelector('.imp-ret[data-id="' + id + '"]').value,
-        x_nytro_descricao_nfse: document.querySelector('.imp-desc[data-id="' + id + '"]').value,
-      }));
-      // Envia em batch (simplificado: envia todos de uma vez)
-      const r = await fetch('/api/v1/nfse/admin/impostos/push', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
-        body: JSON.stringify({ produto_ids: selected, ...updates[0] }),
-      });
-      const d = await r.json();
-      if (d.sucesso) { status.textContent = 'OK! ' + (d.resultados || []).join('; '); status.style.color = 'var(--accent)'; }
-      else { status.textContent = 'Erro: ' + (d.erro || ''); status.style.color = 'var(--danger)'; }
-    } catch (e) { status.textContent = 'Erro: ' + e.message; status.style.color = 'var(--danger)'; }
-    btn.disabled = false; btn.textContent = 'Enviar Impostos ao Odoo';
-  });
-
   // Salvar IM
   $('#btn-salvar-im').addEventListener('click', async () => {
     const im = $('#inp-im-empresa').value.trim();
@@ -731,7 +677,7 @@
     try {
       const r = await fetch('/api/v1/nfse/admin/impostos/push', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
-        body: JSON.stringify({ inscricao_municipal: im, produto_ids: [] }),
+        body: JSON.stringify({ inscricao_municipal: im }),
       });
       const d = await r.json();
       status.textContent = d.sucesso ? 'Salvo!' : 'Erro: ' + (d.erro || '');
