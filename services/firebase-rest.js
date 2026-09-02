@@ -14,6 +14,9 @@
 const crypto = require('crypto');
 const https = require('https');
 const config = require('../config');
+// node-forge: biblioteca JS pura para assinar JWT sem depender do OpenSSL do Node
+// (evita erro 1E08010C:DECODER routines::unsupported em OpenSSL 3.x sem provider legacy)
+const forge = require('node-forge');
 
 let cachedToken = null;  // { token, expiresAt }
 
@@ -21,6 +24,30 @@ let cachedToken = null;  // { token, expiresAt }
 function base64url(buf) {
   return Buffer.from(buf).toString('base64')
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Assina o signInput com a private key do service account usando node-forge.
+ * node-forge e JavaScript puro, nao depende do OpenSSL do sistema.
+ * Retorna a signature em base64url.
+ */
+function signJwtWithForge(signInput, privateKeyPem) {
+  // Limpa a private key (remove aspas extras e converte \n literal)
+  let pk = privateKeyPem;
+  if (typeof pk === 'string') {
+    pk = pk.replace(/\\n/g, '\n').replace(/^"|"$/g, '');
+  }
+  // Converte PEM para objeto private key do forge
+  const forgePrivateKey = forge.pki.privateKeyFromPem(pk);
+  // Cria message digest SHA-256 do signInput
+  const md = forge.md.sha256.create();
+  md.update(signInput, 'utf8');
+  // Assina com PKCS#1 v1.5 (padrao RS256)
+  const signatureBytes = forgePrivateKey.sign(md);
+  // Converte para base64
+  const signatureB64 = forge.util.encode64(signatureBytes);
+  // Converte para base64url
+  return signatureB64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function getAccessToken() {
@@ -43,16 +70,15 @@ function getAccessToken() {
     const encodedPayload = base64url(JSON.stringify(payload));
     const signInput = encodedHeader + '.' + encodedPayload;
 
-    // Limpa a private key (remove aspas extras e converte \n literal)
-    let pk = config.firebase.private_key;
-    if (typeof pk === 'string') {
-      pk = pk.replace(/\\n/g, '\n').replace(/^"|"$/g, '');
+    // Assina com node-forge (JavaScript puro, sem OpenSSL)
+    let signature;
+    try {
+      signature = signJwtWithForge(signInput, config.firebase.private_key);
+    } catch (e) {
+      reject(new Error('Falha ao assinar JWT com node-forge: ' + e.message));
+      return;
     }
-
-    const sign = crypto.createSign('RSA-SHA256');
-    sign.update(signInput);
-    const signature = sign.sign(pk, 'base64');
-    const jwt = signInput + '.' + signature.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const jwt = signInput + '.' + signature;
 
     const postData = 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=' + encodeURIComponent(jwt);
     const reqOpts = {
