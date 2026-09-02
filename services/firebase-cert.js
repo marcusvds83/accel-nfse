@@ -22,38 +22,21 @@ const crypto = require('crypto');
 const forge = require('node-forge');
 const config = require('../config');
 const openPfxWithOpenssl = require('./pfx-openssl').openPfxWithOpenssl;
+// Usa Firestore REST API em vez do firebase-admin SDK (evita erro OpenSSL gRPC)
+const fbRest = require('./firebase-rest');
 
 // === Cache em memoria ===
 let cache = null;
 // { pfx: Buffer, senha: string, privateKeyPem, certPem, chainPem[], info: {...} }
 
 // === Inicializacao do Firebase ===
-let db = null;
-let firebaseReady = false;
-
 function initFirebase() {
-  if (firebaseReady) return;
+  // Nao precisa inicializar nada - firebase-rest usa REST API stateless
   if (!config.firebase.project_id || !config.firebase.client_email || !config.firebase.private_key) {
     console.warn('[FIREBASE-CERT] Firebase nao configurado. Defina FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY.');
-    return;
+    return false;
   }
-  try {
-    const admin = require('firebase-admin');
-    if (admin.apps.length === 0) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: config.firebase.project_id,
-          privateKey: config.firebase.private_key,
-          clientEmail: config.firebase.client_email,
-        }),
-      });
-    }
-    db = admin.firestore();
-    firebaseReady = true;
-    console.log('[FIREBASE-CERT] Firebase inicializado. Projeto: ' + config.firebase.project_id);
-  } catch (e) {
-    console.error('[FIREBASE-CERT] Falha ao inicializar Firebase:', e.message);
-  }
+  return true;
 }
 
 // === Cifragem da senha (AES-256-GCM) ===
@@ -156,8 +139,7 @@ function openPfx(pfxBuffer, senha) {
 async function salvarCertificado(pfxBuffer, senha) {
   if (!pfxBuffer || !pfxBuffer.length) throw new Error('Arquivo .pfx vazio.');
   if (!senha) throw new Error('Senha do certificado obrigatoria.');
-  initFirebase();
-  if (!db) throw new Error('Firebase nao inicializado. Configure as variaveis de ambiente.');
+  if (!initFirebase()) throw new Error('Firebase nao configurado. Configure as variaveis de ambiente.');
 
   // Valida a senha antes de persistir
   const aberto = openPfx(pfxBuffer, senha);
@@ -166,12 +148,12 @@ async function salvarCertificado(pfxBuffer, senha) {
   const doc = {
     pfxBase64: pfxBuffer.toString('base64'),
     senhaCifrada: encryptSenha(senha),
-    info: aberto.info,
+    info: JSON.stringify(aberto.info),  // REST API guarda strings; fazemos JSON do objeto info
     uploadEm: new Date().toISOString(),
     atualizadoEm: new Date().toISOString(),
   };
 
-  await db.collection(config.firebase.collection).doc(config.firebase.doc_id).set(doc);
+  await fbRest.setDoc(config.firebase.collection, config.firebase.doc_id, doc);
 
   // Atualiza cache
   cache = {
@@ -190,21 +172,15 @@ async function salvarCertificado(pfxBuffer, senha) {
 /** Carrega o certificado do Firebase (ou cache em memoria). */
 async function carregarCertificado() {
   if (cache) return cache;
-  initFirebase();
-  if (!db) {
-    console.warn('[FIREBASE-CERT] Firebase nao disponivel.');
+  if (!initFirebase()) {
+    console.warn('[FIREBASE-CERT] Firebase nao configurado.');
     return null;
   }
 
   try {
-    const snap = await db.collection(config.firebase.collection).doc(config.firebase.doc_id).get();
-    if (!snap.exists) {
+    const doc = await fbRest.getDoc(config.firebase.collection, config.firebase.doc_id);
+    if (!doc || !doc.pfxBase64 || !doc.senhaCifrada) {
       console.warn('[FIREBASE-CERT] Nenhum certificado encontrado no Firebase.');
-      return null;
-    }
-    const doc = snap.data();
-    if (!doc.pfxBase64 || !doc.senhaCifrada) {
-      console.error('[FIREBASE-CERT] Documento do Firebase esta incompleto.');
       return null;
     }
 
@@ -230,17 +206,20 @@ async function carregarCertificado() {
 
 /** Retorna o status do certificado (nao carrega o PEM, so as infos). */
 async function statusCertificado() {
-  initFirebase();
-  if (!db) return { configurado: false, erro: 'Firebase nao configurado' };
+  if (!initFirebase()) return { configurado: false, erro: 'Firebase nao configurado' };
 
   // Se tem cache, usa o cache
   if (cache) return Object.assign({ configurado: true, origem: 'cache' }, cache.info);
 
   try {
-    const snap = await db.collection(config.firebase.collection).doc(config.firebase.doc_id).get();
-    if (!snap.exists) return { configurado: false, mensagem: 'Nenhum certificado A1 no Firebase.' };
-    const doc = snap.data();
-    return Object.assign({ configurado: true, origem: 'firebase', uploadEm: doc.uploadEm }, doc.info);
+    const doc = await fbRest.getDoc(config.firebase.collection, config.firebase.doc_id);
+    if (!doc || !doc.info) return { configurado: false, mensagem: 'Nenhum certificado A1 no Firebase.' };
+    // info foi salvo como JSON string
+    let info = doc.info;
+    if (typeof info === 'string') {
+      try { info = JSON.parse(info); } catch (e) { info = {}; }
+    }
+    return Object.assign({ configurado: true, origem: 'firebase', uploadEm: doc.uploadEm }, info);
   } catch (e) {
     return { configurado: false, erro: e.message };
   }
@@ -248,10 +227,9 @@ async function statusCertificado() {
 
 /** Remove o certificado do Firebase e do cache. */
 async function removerCertificado() {
-  initFirebase();
-  if (db) {
+  if (initFirebase()) {
     try {
-      await db.collection(config.firebase.collection).doc(config.firebase.doc_id).delete();
+      await fbRest.deleteDoc(config.firebase.collection, config.firebase.doc_id);
     } catch (e) { /* ignore */ }
   }
   cache = null;
@@ -259,4 +237,4 @@ async function removerCertificado() {
   return true;
 }
 
-module.exports = { salvarCertificado, carregarCertificado, statusCertificado, removerCertificado };
+module.exports = { salvarCertificado, carregarCertificado, statusCertificado, removerCertificado, testFirebaseConnection: () => fbRest.testConnection() };

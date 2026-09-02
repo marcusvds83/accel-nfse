@@ -98,20 +98,10 @@ router.post('/logo', apiKeyAuth, async (req, res) => {
     const buf = Buffer.from(logoBase64, 'base64');
     if (buf.length < 100) return res.status(400).json({ erro: 'Logo muito pequena' });
 
-    // Inicializa Firebase
-    const admin = require('firebase-admin');
+    // Usa Firestore REST API (sem firebase-admin SDK, sem gRPC)
     const config = require('../config');
-    if (admin.apps.length === 0) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: config.firebase.project_id,
-          privateKey: config.firebase.private_key,
-          clientEmail: config.firebase.client_email,
-        }),
-      });
-    }
-    const db = admin.firestore();
-    await db.collection(config.firebase.collection).doc('logo').set({
+    const fbRest = require('../services/firebase-rest');
+    await fbRest.setDoc(config.firebase.collection, 'logo', {
       logoBase64: logoBase64,
       tamanho: buf.length,
       uploadEm: new Date().toISOString(),
@@ -124,10 +114,21 @@ router.post('/logo', apiKeyAuth, async (req, res) => {
     } catch (_) { /* ignore */ }
 
     console.log('[CERT-LOGO] Logo salva no Firebase: ' + buf.length + ' bytes');
-    res.json({ sucesso: true, tamanho: buf.length, mensagem: 'Logo salva no Firebase e no arquivo local.' });
+    res.json({ sucesso: true, tamanho: buf.length, mensagem: 'Logo salva no Firebase.' });
   } catch (err) {
     console.error('[CERT-LOGO] Erro:', err.message);
     res.status(500).json({ erro: err.message });
+  }
+});
+
+// === Testar conexao Firebase ===
+router.get('/firebase/test', apiKeyAuth, async (req, res) => {
+  try {
+    const fbRest = require('../services/firebase-rest');
+    const result = await fbRest.testConnection();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ ok: false, erro: err.message });
   }
 });
 

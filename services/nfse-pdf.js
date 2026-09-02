@@ -24,12 +24,11 @@ let logoLoaded = false;
 
 async function loadLogoFromFirebase() {
   try {
-    const admin = require('firebase-admin');
-    if (admin.apps.length === 0) return null;
-    const db = admin.firestore();
-    const snap = await db.collection(config.firebase.collection).doc('logo').get();
-    if (!snap.exists || !snap.data().logoBase64) return null;
-    return Buffer.from(snap.data().logoBase64, 'base64');
+    // Usa Firestore REST API (sem firebase-admin, sem gRPC, sem erro OpenSSL)
+    const fbRest = require('./firebase-rest');
+    const doc = await fbRest.getDoc(config.firebase.collection, 'logo');
+    if (!doc || !doc.logoBase64) return null;
+    return Buffer.from(doc.logoBase64, 'base64');
   } catch (e) {
     return null;
   }
