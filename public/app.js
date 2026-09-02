@@ -1,5 +1,5 @@
 /**
- * Nytro Fiscal Cloud — Frontend App
+ * Accel Fiscal Cloud — Frontend App
  * ======================================
  */
 
