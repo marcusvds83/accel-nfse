@@ -423,4 +423,268 @@ router.post('/admin/tributacao', apiKeyAuth, async (req, res) => {
   }
 });
 
+// ==========================================================
+// ACEL SETUP COMPLETO
+// ==========================================================
+// POST /api/v1/nfse/admin/accel/setup-completo
+//   - Garante todos os campos x_nytro_nfse_* no Odoo (account.move + res.company)
+//   - Seta valor inicial 1 em x_nytro_nfse_numero (res.company) em todas as empresas
+//   - Atualiza (ou cria) as Server Actions "Emitir NFS-e" e "Cancelar NFS-e"
+//     com codigo que dispara o polling do middleware (seta x_nytro_nfse_status='pendente')
+//   - Mantem compatibilidade com os campos x_nfse_* ja existentes (write em ambos)
+// ==========================================================
+
+router.post('/admin/accel/setup-completo', apiKeyAuth, async (req, res) => {
+  const log = [];
+  try {
+    if (!config.odoo.enabled) return res.json({ erro: 'Odoo nao configurado' });
+    const client = createClient();
+    const uid = await authenticate(client);
+    const db = config.odoo.db;
+
+    // ----- 1. Campos x_nytro_nfse_* necessarios no Odoo -----
+    const camposNecessarios = [
+      { modelo: 'account.move', nome: 'x_nytro_nfse_status', tipo: 'selection', selecoes: "[('vazio','Vazio'),('pendente','Pendente'),('processando','Processando'),('autorizada','Autorizada'),('cancelada','Cancelada'),('cancelar_solicitado','Cancel. Solicitado'),('erro','Erro')]", label: 'NFS-e Status (Nytro)', default: 'vazio' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_numero', tipo: 'char', kwargs: { size: 20 }, label: 'NFS-e Numero (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_codigo_verificacao', tipo: 'char', kwargs: { size: 60 }, label: 'NFS-e Codigo Verificacao (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_protocolo', tipo: 'char', kwargs: { size: 80 }, label: 'NFS-e Protocolo (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_data_emissao', tipo: 'datetime', label: 'NFS-e Data Emissao (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_xml', tipo: 'text', label: 'NFS-e XML (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_url', tipo: 'char', kwargs: { size: 300 }, label: 'NFS-e URL (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_erro', tipo: 'boolean', label: 'NFS-e Erro (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_mensagem', tipo: 'text', label: 'NFS-e Mensagem Erro (Nytro)' },
+      { modelo: 'account.move', nome: 'x_nytro_nfse_dados_prestador_im', tipo: 'char', kwargs: { size: 20 }, label: 'NFS-e IM Prestador (Nytro)' },
+      { modelo: 'res.company', nome: 'x_nytro_nfse_numero', tipo: 'integer', label: 'NFS-e Ultimo Numero (Nytro)', help: 'Contador/sequencial de NFS-e. O middleware le este valor, soma 1 para a proxima DPS, e grava de volta.' },
+      { modelo: 'res.company', nome: 'x_nytro_nfse_dados_prestador_im', tipo: 'char', kwargs: { size: 20 }, label: 'NFS-e IM Prestador (Nytro)' },
+    ];
+
+    // Cache de model IDs
+    const modelIds = {};
+    for (const m of [...new Set(camposNecessarios.map(c => c.modelo))]) {
+      const ids = await executeKw(client, db, uid, 'ir.model', 'search', [[['model', '=', m]]]);
+      modelIds[m] = ids.length ? ids[0] : null;
+    }
+
+    const camposResult = [];
+    for (const c of camposNecessarios) {
+      const existing = await executeKw(client, db, uid, 'ir.model.fields', 'search', [[['model', '=', c.modelo], ['name', '=', c.nome]]]);
+      if (existing.length) {
+        camposResult.push({ campo: c.nome, modelo: c.modelo, status: 'ja_existe', id: existing[0] });
+        continue;
+      }
+      try {
+        const vals = {
+          name: c.nome,
+          field_description: c.label,
+          model_id: modelIds[c.modelo],
+          ttype: c.tipo,
+          state: 'manual',
+          store: true,
+        };
+        if (c.selecoes) vals.selection = c.selecoes;
+        if (c.default) vals.default = c.default;
+        if (c.help) vals.help = c.help;
+        const id = await executeKw(client, db, uid, 'ir.model.fields', 'create', [vals]);
+        camposResult.push({ campo: c.nome, modelo: c.modelo, status: 'criado', id });
+      } catch (e) {
+        camposResult.push({ campo: c.nome, modelo: c.modelo, status: 'erro', erro: e.message });
+      }
+    }
+    log.push('Campos: ' + camposResult.filter(c => c.status === 'criado').length + ' criados, ' + camposResult.filter(c => c.status === 'ja_existe').length + ' ja existiam');
+
+    // ----- 2. Setar x_nytro_nfse_numero = 1 em todas as empresas -----
+    const companyIds = await executeKw(client, db, uid, 'res.company', 'search', [[]]);
+    const companies = await executeKw(client, db, uid, 'res.company', 'read', [companyIds, ['name', 'x_nytro_nfse_numero']]);
+    const empresasAtualizadas = [];
+    for (const c of companies) {
+      const atual = c.x_nytro_nfse_numero || 0;
+      // So seta 1 se estiver vazio/null/zero
+      if (!atual) {
+        await executeKw(client, db, uid, 'res.company', 'write', [[c.id], { x_nytro_nfse_numero: 1 }]);
+        empresasAtualizadas.push({ id: c.id, name: c.name, antes: atual, depois: 1 });
+      } else {
+        empresasAtualizadas.push({ id: c.id, name: c.name, antes: atual, depois: atual, status: 'ja_tinha_valor' });
+      }
+    }
+    log.push('Empresas: ' + empresasAtualizadas.filter(e => e.depois === 1 && !e.status).length + ' setadas para 1');
+
+    // ----- 3. Atualizar/Criar Server Actions -----
+    // Codigo novo: dispara polling do middleware (seta x_nytro_nfse_status='pendente')
+    // e mantem compatibilidade com x_nfse_status_emissao (campo existente do cliente)
+    const codigoEmitir = `# Emitir NFS-e - Accel (integra middleware Render via polling)
+# Server Action criada/atualizada pelo endpoint /admin/accel/setup-completo
+for rec in records:
+    if rec.state != 'posted':
+        raise UserError('A fatura deve estar confirmada (Posted) antes de emitir a NFS-e.')
+    status_atual = (rec.x_nytro_nfse_status or 'vazio')
+    if status_atual in ('pendente', 'processando', 'autorizada'):
+        raise UserError('Esta fatura ja tem NFS-e em andamento ou emitida. Status: %s' % status_atual)
+
+    vals = {
+        'x_nytro_nfse_status': 'pendente',
+        'x_nytro_nfse_erro': False,
+        'x_nytro_nfse_mensagem': False,
+    }
+    # Compatibilidade com campo x_nfse_status_emissao (se existir)
+    try:
+        rec.write(vals)
+        # Tenta escrever no campo do cliente (se existir) - safe fallback
+        try:
+            rec.write({'x_nfse_status_emissao': 'pendente', 'x_nfse_mensagem': False})
+        except Exception:
+            pass  # campo nao existe, ignora
+    except Exception as e:
+        raise UserError('Erro ao marcar fatura como pendente: %s' % str(e))`;
+
+    const codigoCancelar = `# Cancelar NFS-e - Accel (integra middleware Render via polling)
+# Server Action criada/atualizada pelo endpoint /admin/accel/setup-completo
+for rec in records:
+    status_atual = (rec.x_nytro_nfse_status or 'vazio')
+    if status_atual not in ('autorizada',):
+        raise UserError('Apenas NFS-e autorizadas podem ser canceladas. Status atual: %s' % status_atual)
+    if not rec.x_nytro_nfse_numero:
+        raise UserError('Nenhuma NFS-e vinculada a esta fatura.')
+
+    vals = {
+        'x_nytro_nfse_status': 'cancelar_solicitado',
+        'x_nytro_nfse_mensagem': 'Cancelamento solicitado via Odoo. Aguardando processamento pelo middleware.',
+    }
+    try:
+        rec.write(vals)
+        # Compatibilidade com campo x_nfse_status_emissao (se existir) - safe fallback
+        try:
+            rec.write({'x_nfse_status_emissao': 'cancelar_solicitado', 'x_nfse_mensagem': 'Cancelamento solicitado via Odoo.'})
+        except Exception:
+            pass
+    except Exception as e:
+        raise UserError('Erro ao solicitar cancelamento: %s' % str(e))`;
+
+    const acoes = [
+      { nome: 'Emitir NFS-e', codigo: codigoEmitir },
+      { nome: 'Cancelar NFS-e', codigo: codigoCancelar },
+    ];
+
+    const acoesResult = [];
+    const accountMoveModelId = modelIds['account.move'];
+
+    for (const acao of acoes) {
+      // Busca por nome exato OU por ID 1041/1042 (legacy)
+      let existing = await executeKw(client, db, uid, 'ir.actions.server', 'search', [
+        ['|', ['name', '=', acao.nome], ['name', 'ilike', acao.nome]]
+      ], { limit: 5 });
+
+      // Tambem tenta buscar pelos IDs antigos 1041/1042
+      const legacyIds = acao.nome === 'Emitir NFS-e' ? [1041] : [1042];
+      const legacyById = await executeKw(client, db, uid, 'ir.actions.server', 'search', [
+        [['id', 'in', legacyIds]]
+      ]);
+      const todosIds = [...new Set([...existing, ...legacyById])];
+
+      if (todosIds.length === 0) {
+        // Cria nova
+        try {
+          const id = await executeKw(client, db, uid, 'ir.actions.server', 'create', [{
+            name: acao.nome,
+            model_id: accountMoveModelId,
+            binding_model_id: accountMoveModelId,
+            binding_view_types: 'form',
+            state: 'code',
+            code: acao.codigo,
+          }]);
+          acoesResult.push({ nome: acao.nome, status: 'criada', id });
+        } catch (e) {
+          acoesResult.push({ nome: acao.nome, status: 'erro_criar', erro: e.message });
+        }
+      } else {
+        // Atualiza todas as encontradas (pode ter mais de uma com nome parecido)
+        for (const id of todosIds) {
+          try {
+            await executeKw(client, db, uid, 'ir.actions.server', 'write', [[id], {
+              state: 'code',
+              code: acao.codigo,
+              name: acao.nome,
+            }]);
+            acoesResult.push({ nome: acao.nome, status: 'atualizada', id });
+          } catch (e) {
+            acoesResult.push({ nome: acao.nome, status: 'erro_atualizar', id, erro: e.message });
+          }
+        }
+      }
+    }
+    log.push('Server Actions: ' + acoesResult.filter(a => a.status === 'atualizada' || a.status === 'criada').length + ' processadas');
+
+    res.json({
+      sucesso: true,
+      log,
+      campos: camposResult,
+      empresas: empresasAtualizadas,
+      acoes: acoesResult,
+      proximos_passos: [
+        '1. No Odoo, abra uma fatura de cliente (out_invoice) confirmada',
+        '2. Clique em Acao > Emitir NFS-e - isso seta x_nytro_nfse_status=pendente',
+        '3. Aguarde 15s (polling do middleware)',
+        '4. Atualize a fatura - os campos x_nytro_nfse_numero, x_nytro_nfse_xml, etc estarao preenchidos',
+        '5. Para cancelar: Acao > Cancelar NFS-e (so funciona se status=autorizada)',
+      ],
+    });
+  } catch (err) {
+    console.error('[ACCEL-SETUP] Erro:', err.message);
+    res.status(500).json({ erro: err.message, log });
+  }
+});
+
+// GET /api/v1/nfse/admin/accel/status - le o status atual do setup no Odoo
+router.get('/admin/accel/status', apiKeyAuth, async (req, res) => {
+  try {
+    if (!config.odoo.enabled) return res.json({ erro: 'Odoo nao configurado' });
+    const client = createClient();
+    const uid = await authenticate(client);
+    const db = config.odoo.db;
+
+    // 1. Lista campos x_* em account.move e res.company
+    const camposReport = {};
+    for (const modelo of ['account.move', 'res.company']) {
+      const fields = await executeKw(client, db, uid, 'ir.model.fields', 'search_read', [
+        [['model', '=', modelo], ['name', 'like', 'x_']],
+        ['name', 'field_description', 'ttype'],
+        0, 100,
+        'name'
+      ]);
+      camposReport[modelo] = fields.map(f => ({ name: f.name, type: f.ttype, label: f.field_description }));
+    }
+
+    // 2. Lista Server Actions relacionadas a NFS-e
+    const actions = await executeKw(client, db, uid, 'ir.actions.server', 'search_read', [
+      [['name', 'ilike', 'NFS']],
+      ['id', 'name', 'state'],
+      0, 20,
+      'id'
+    ]);
+
+    // 3. Lista empresas com valor de x_nytro_nfse_numero
+    const companyIds = await executeKw(client, db, uid, 'res.company', 'search', [[]]);
+    let companies = [];
+    try {
+      companies = await executeKw(client, db, uid, 'res.company', 'read', [companyIds, ['name', 'x_nytro_nfse_numero']]);
+    } catch (e) {
+      companies = await executeKw(client, db, uid, 'res.company', 'read', [companyIds, ['name']]);
+    }
+
+    res.json({
+      odoo_url: config.odoo.url,
+      odoo_db: db,
+      total_campos_account_move: camposReport['account.move'].length,
+      total_campos_res_company: camposReport['res.company'].length,
+      tem_x_nytro_nfse_status_em_account_move: camposReport['account.move'].some(f => f.name === 'x_nytro_nfse_status'),
+      tem_x_nytro_nfse_numero_em_res_company: camposReport['res.company'].some(f => f.name === 'x_nytro_nfse_numero'),
+      server_actions: actions,
+      empresas: companies.map(c => ({ id: c.id, name: c.name, x_nytro_nfse_numero: c.x_nytro_nfse_numero || 0 })),
+      campos_account_move: camposReport['account.move'],
+      campos_res_company: camposReport['res.company'],
+    });
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
+  }
+});
+
 module.exports = router;
