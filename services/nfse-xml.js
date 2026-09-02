@@ -172,6 +172,16 @@ async function gerarXmlDPS(dados) {
   const fonePrestXml = fonePrest.length >= 10 ? `\n      <fone>${fonePrest}</fone>` : '';
   const emailPrestXml = emailPrest ? `\n      <email>${escXml(emailPrest)}</email>` : '';
 
+  // IM (Inscricao Municipal) - OBRIGATORIO se o municipio exigir (Curitiba exige)
+  // Fonte: campo x_nytro_nfse_dados_prestador_im no Odoo (setado pelo painel admin aba Impostos)
+  // Fallback: config.nfse.inscricao_municipal (env var NFSE_IM no Render)
+  const imPrest = String(company.x_nytro_nfse_dados_prestador_im || c.inscricao_municipal || '').trim();
+  const imPrestXml = imPrest ? `\n      <IM>${escXml(imPrest)}</IM>` : '';
+
+  // Nome do prestador (xNome) - usa razao social da empresa
+  const nomePrest = company.name || company.legal_name || '';
+  const nomePrestXml = nomePrest ? `\n      <xNome>${escXml(nomePrest)}</xNome>` : '';
+
   // Endereco do prestador (opcional no XSD)
   const logrPrest = limpaLogradouro(company.street);
   const nroPrest = extraiNumero(company.street, company.street2);
@@ -290,7 +300,7 @@ async function gerarXmlDPS(dados) {
     <tpEmit>1</tpEmit>
     <cLocEmi>${ibge}</cLocEmi>
     <prest>
-      <CNPJ>${cnpjPrest}</CNPJ>${fonePrestXml}${emailPrestXml}
+      <CNPJ>${cnpjPrest}</CNPJ>${imPrestXml}${nomePrestXml}${endPrestXml}${fonePrestXml}${emailPrestXml}
       <regTrib>
         <opSimpNac>${c.op_simp_nac}</opSimpNac>
         <regApTribSN>${c.reg_ap_trib_sn}</regApTribSN>

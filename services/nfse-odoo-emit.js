@@ -323,13 +323,37 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     if (resultado.xmlRetorno && resultado.xmlRetorno.length < 50000) {
       updateData.x_nytro_nfse_xml = resultado.xmlRetorno;
     }
+
+    // Compatibilidade: tambem escreve nos campos x_nfse_* (sem _nytro_) que
+    // existem na view de fatura do cliente Accel (criados via Studio).
+    // Usa try/catch para cada campo - se o campo nao existir no Odoo, ignora.
+    const xCompat = {
+      x_nfse_numero: String(resultado.nNFSe || proximoNumero),
+      x_nfse_codigo_verificacao: resultado.chaveAcesso || resultado.nDFSe || '',
+      x_nfse_protocolo: resultado.idDps || '',
+      x_nfse_data_emissao: dataEmissao,
+      x_nfse_status_emissao: 'autorizada',
+      x_nfse_situacao: '1',  // 1=Normal, 2=Cancelada
+      x_nfse_mensagem: false,
+      x_nfse_erro: false,
+      x_nfse_url: resultado.chaveAcesso ? ('https://adn.nfse.gov.br/danfse/' + resultado.chaveAcesso) : '',
+    };
+    if (resultado.xmlRetorno && resultado.xmlRetorno.length < 50000) {
+      xCompat.x_nfse_xml = resultado.xmlRetorno;
+    }
+    Object.assign(updateData, xCompat);
+
     await executeKw(client, db, uid, 'account.move', 'write', [[moveId], updateData]);
 
-    const msgBody = '<b>NFS-e Emitida com Sucesso!</b><br/>' +
-      'Numero: <b>' + (resultado.nNFSe || proximoNumero) + '</b><br/>' +
-      'Chave: ' + (resultado.chaveAcesso || '-') + '<br/>' +
-      'DFSe: ' + (resultado.nDFSe || '-') + '<br/>' +
-      'IdDPS: ' + (resultado.idDps || '-');
+    const msgBody = '<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:12px;margin:8px 0;border-radius:4px">' +
+      '<b style="color:#15803d">✓ NFS-e Emitida com Sucesso!</b><br/>' +
+      '<b>Número:</b> ' + (resultado.nNFSe || proximoNumero) + '<br/>' +
+      '<b>Chave de Acesso:</b> ' + (resultado.chaveAcesso || '-') + '<br/>' +
+      '<b>DFSe:</b> ' + (resultado.nDFSe || '-') + '<br/>' +
+      '<b>IdDPS:</b> ' + (resultado.idDps || '-') + '<br/>' +
+      '<b>Ambiente:</b> ' + (config.nfse.tp_amb === 1 ? 'PRODUÇÃO' : 'HOMOLOGAÇÃO') + '<br/>' +
+      (resultado.chaveAcesso ? '<br/><a href="https://adn.nfse.gov.br/danfse/' + resultado.chaveAcesso + '" target="_blank">📄 Ver DANFSe oficial</a>' : '') +
+      '</div>';
     await executeKw(client, db, uid, 'mail.message', 'create', [{
       model: 'account.move',
       res_id: moveId,
@@ -409,15 +433,34 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
 // === Atualiza erro no Odoo ===
 async function safeUpdateError(client, db, uid, moveId, errMsg) {
   try {
-    await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
+    const updateData = {
       x_nytro_nfse_status: config.nfse.status_on_error || 'erro',
       x_nytro_nfse_erro: true,
       x_nytro_nfse_mensagem: errMsg.substring(0, 1000),
-    }]);
+    };
+    // Compatibilidade: tambem atualiza campos x_nfse_* da view do cliente
+    Object.assign(updateData, {
+      x_nfse_status_emissao: 'erro',
+      x_nfse_erro: true,
+      x_nfse_mensagem: errMsg.substring(0, 1000),
+    });
+    await executeKw(client, db, uid, 'account.move', 'write', [[moveId], updateData]);
+
+    // Extrai codigo do erro se presente (ex: "E0116" -> badge)
+    const codigoMatch = errMsg.match(/(?:E\d{4}|cStat=\d+)/);
+    const codigoBadge = codigoMatch ? codigoMatch[0] : 'ERRO';
+
+    const msgBody = '<div style="background:#fef2f2;border-left:4px solid #dc2626;padding:12px;margin:8px 0;border-radius:4px">' +
+      '<b style="color:#b91c1c">✗ Erro na Emissão de NFS-e</b><br/>' +
+      '<b>Código:</b> <code style="background:#fee2e2;padding:2px 6px;border-radius:3px">' + codigoBadge + '</code><br/>' +
+      '<b>Mensagem:</b> ' + errMsg.substring(0, 800).replace(/</g, '&lt;') + '<br/>' +
+      '<b>Ambiente:</b> ' + (config.nfse.tp_amb === 1 ? 'PRODUÇÃO' : 'HOMOLOGAÇÃO') + '<br/>' +
+      '<b>Próximo passo:</b> Corrija o problema e clique novamente em "Emitir NFS-e"' +
+      '</div>';
     await executeKw(client, db, uid, 'mail.message', 'create', [{
       model: 'account.move',
       res_id: moveId,
-      body: '<b>Erro na Emissao de NFS-e</b><br/>' + errMsg.substring(0, 500),
+      body: msgBody,
       message_type: 'comment',
     }]);
   } catch (e) {
