@@ -25,7 +25,26 @@ router.post('/', apiKeyAuth, async (req, res) => {
     if (!pfxBase64) return res.status(400).json({ erro: 'pfxBase64 obrigatorio' });
     if (!senha) return res.status(400).json({ erro: 'senha obrigatoria' });
 
-    const pfx = Buffer.from(pfxBase64, 'base64');
+    // Limpa whitespace/newlines que podem vir no base64
+    const b64clean = String(pfxBase64).replace(/\s+/g, '');
+    const pfx = Buffer.from(b64clean, 'base64');
+
+    // Validacoes do buffer antes de chamar OpenSSL
+    if (pfx.length < 100) {
+      return res.status(400).json({
+        sucesso: false,
+        erro: 'Arquivo .pfx muito pequeno (' + pfx.length + ' bytes). Verifique se o upload foi concluido.',
+      });
+    }
+    // PKCS12 valido comeca com 0x30 (SEQUENCE) e segundo byte geralmente 0x82 ou 0x83 (long form length)
+    if (pfx[0] !== 0x30) {
+      return res.status(400).json({
+        sucesso: false,
+        erro: 'Arquivo nao parece ser um PKCS12 valido (primeiro byte: 0x' + pfx[0].toString(16) + ', esperado 0x30). ' +
+              'Verifique se o arquivo .pfx nao esta corrompido e se foi enviado como binario (nao texto).',
+      });
+    }
+
     const info = await salvarCertificado(pfx, senha);
     res.json({ sucesso: true, info });
   } catch (err) {

@@ -793,7 +793,19 @@
     if (!senha) { alert('Digite a senha do certificado.'); return; }
     const btn = $('#btn-upload-cert'); btn.disabled = true; btn.textContent = 'Enviando...';
     try {
-      const b64 = await file.text();
+      // Le o arquivo binario como DataURL e extrai apenas o base64 (sem o prefixo 'data:...;base64,')
+      // (Antes usava file.text() que devolvia o binario como UTF-8 string - corrompia o PKCS12)
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const idx = result.indexOf(';base64,');
+          if (idx === -1) { reject(new Error('Falha ao ler arquivo como base64')); return; }
+          resolve(result.substring(idx + 8));
+        };
+        reader.onerror = () => reject(reader.error || new Error('Erro de leitura'));
+        reader.readAsDataURL(file);
+      });
       const r = await fetch('/api/v1/nfse/certificado', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
@@ -813,7 +825,18 @@
     if (!file) { alert('Selecione a imagem da logo.'); return; }
     const btn = $('#btn-upload-logo'); btn.disabled = true; btn.textContent = 'Enviando...';
     try {
-      const b64 = await file.text();
+      // Le como DataURL e extrai apenas o base64 (mesmo fix do certificado)
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const idx = result.indexOf(';base64,');
+          if (idx === -1) { reject(new Error('Falha ao ler imagem como base64')); return; }
+          resolve(result.substring(idx + 8));
+        };
+        reader.onerror = () => reject(reader.error || new Error('Erro de leitura'));
+        reader.readAsDataURL(file);
+      });
       const r = await fetch('/api/v1/nfse/certificado/logo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
