@@ -172,14 +172,20 @@ async function gerarXmlDPS(dados) {
   const fonePrestXml = fonePrest.length >= 10 ? `\n      <fone>${fonePrest}</fone>` : '';
   const emailPrestXml = emailPrest ? `\n      <email>${escXml(emailPrest)}</email>` : '';
 
-  // IM (Inscricao Municipal) - OBRIGATORIO se o municipio exigir (Curitiba exige)
-  // Fonte: campo x_nytro_nfse_dados_prestador_im no Odoo (setado pelo painel admin aba Impostos)
-  // Fallback: config.nfse.inscricao_municipal (env var NFSE_IM no Render)
+  // IM (Inscricao Municipal) - OPCIONAL via env var NFSE_INCLUIR_IM=1
+  // Descoberto em 03/09/2026: comparando XML da Nytro (funciona) com Accel (E0116):
+  // - Nytro NAO envia <IM> no <prest> e emite normalmente em Curitiba
+  // - Accel enviava <IM>170110079908</IM> e a SEFIN rejeitava com E0116
+  //   porque a IM nao batia com o cadastrado no CNC NFS-e da SEFIN Nacional
+  // Conclusao: quando a empresa e credenciada na SEFIN Nacional por CNPJ,
+  // a SEFIN ja sabe a IM - nao precisa (e nao deve) enviar no XML.
+  // Para incluir IM, setar env var NFSE_INCLUIR_IM=1 no Render.
+  const incluirIm = process.env.NFSE_INCLUIR_IM === '1';
   const imFromOdoo = company.x_nytro_nfse_dados_prestador_im || '';
   const imFromConfig = c.inscricao_municipal || '';
-  const imPrest = String(imFromOdoo || imFromConfig || '').trim();
+  const imPrest = incluirIm ? String(imFromOdoo || imFromConfig || '').trim() : '';
   const imPrestXml = imPrest ? `\n      <IM>${escXml(imPrest)}</IM>` : '';
-  console.log('[NFSE-XML] IM prestador: odoo="' + imFromOdoo + '" config="' + imFromConfig + '" usado="' + imPrest + '"');
+  console.log('[NFSE-XML] IM prestador: incluirIm=' + incluirIm + ' odoo="' + imFromOdoo + '" config="' + imFromConfig + '" usado="' + imPrest + '"');
 
   // Nome do prestador (xNome) - usa razao social da empresa
   const nomePrest = company.name || company.legal_name || '';
