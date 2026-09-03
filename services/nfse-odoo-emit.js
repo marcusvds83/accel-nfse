@@ -574,7 +574,7 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
 
   console.log('[NFSE-EMIT] Criando anexo: ' + nome + ' (' + Math.round(dados.length * 0.75) + ' bytes)...');
 
-  // Cria o attachment (igual ao codigo da Nytro que funciona em producao)
+  // 1. Cria o attachment (igual Nytro - funciona em Odoo 17/18/19)
   const attachValues = {
     name: nome,
     datas: dados,
@@ -585,17 +585,37 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
   const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
   console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId);
 
-  // Cria mail.message vinculando o attachment ao chatter
+  // 2. Busca o subtype_id correto (Odoo 19 EXIGE subtype_id explicito)
+  // mail.mt_comment = notas internas/comentarios (aparece no chatter)
+  // mail.mt_note = log/notes (nao aparece por padrao)
+  let subtypeId = false;
+  try {
+    const subtypes = await executeKw(client, db, uid, 'ir.model.data', 'search_read', [
+      [['name', '=', 'mt_comment'], ['module', '=', 'mail']],
+      ['res_id'],
+    ]);
+    if (subtypes.length > 0) {
+      subtypeId = subtypes[0].res_id;
+      console.log('[NFSE-EMIT] subtype_id mt_comment encontrado: ' + subtypeId);
+    }
+  } catch (e) {
+    console.warn('[NFSE-EMIT] Nao foi possivel buscar subtype_id:', e.message);
+  }
+
+  // 3. Cria mail.message com TODOS os campos que Odoo 19 exige
   try {
     const body = msgBody || 'Anexo: ' + nome;
-    await executeKw(client, db, uid, 'mail.message', 'create', [{
+    const msgVals = {
       model: model,
       res_id: resId,
       body: body,
       message_type: 'comment',
+      subtype_id: subtypeId || false,
+      record_name: nome,  // Odoo 19 usa isso pra mostrar no chatter
       attachment_ids: [[6, 0, [attachmentId]]],
-    }]);
-    console.log('[NFSE-EMIT] mail.message criada com anexo ' + nome);
+    };
+    const msgId = await executeKw(client, db, uid, 'mail.message', 'create', [msgVals]);
+    console.log('[NFSE-EMIT] mail.message criada (id=' + msgId + ') com anexo ' + nome);
   } catch (msgErr) {
     console.warn('[NFSE-EMIT] mail.message falhou (anexo ainda existe como ir.attachment id=' + attachmentId + '):', msgErr.message);
   }

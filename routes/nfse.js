@@ -305,12 +305,24 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
           res_model: 'account.move', res_id: move_id, mimetype: 'application/xml',
         }]], (err, id) => err ? reject(err) : resolve(id));
       });
-      // Vincula a mensagem no chatter
+      // Busca subtype_id mt_comment (Odoo 19 exige explicito)
+      let subtypeId = false;
+      try {
+        const subtypes = await new Promise((resolve, reject) => {
+          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.model.data', 'search_read', [
+            [['name', '=', 'mt_comment'], ['module', '=', 'mail']], ['res_id'],
+          ]], (err, r) => err ? reject(err) : resolve(r));
+        });
+        if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
+      } catch (e) { /* ignore */ }
+      // Vincula a mensagem no chatter com subtype_id (Odoo 19)
       await new Promise((resolve, reject) => {
         client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
           model: 'account.move', res_id: move_id,
           body: '<b>XML NFS-e ' + numNF + '</b> (re-anexado)',
           message_type: 'comment',
+          subtype_id: subtypeId || false,
+          record_name: xmlNome,
           attachment_ids: [[6, 0, [attachId]]],
         }]], (err, id) => err ? reject(err) : resolve(id));
       });
@@ -341,11 +353,23 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
             res_model: 'account.move', res_id: move_id, mimetype: 'application/pdf',
           }]], (err, id) => err ? reject(err) : resolve(id));
         });
+        // Busca subtype_id mt_comment (Odoo 19 exige explicito)
+        let subtypeId = false;
+        try {
+          const subtypes = await new Promise((resolve, reject) => {
+            client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.model.data', 'search_read', [
+              [['name', '=', 'mt_comment'], ['module', '=', 'mail']], ['res_id'],
+            ]], (err, r) => err ? reject(err) : resolve(r));
+          });
+          if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
+        } catch (e) { /* ignore */ }
         await new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
             model: 'account.move', res_id: move_id,
             body: '<b>DANFSe ' + numNF + '</b> - re-anexado',
             message_type: 'comment',
+            subtype_id: subtypeId || false,
+            record_name: pdfNome,
             attachment_ids: [[6, 0, [attachId]]],
           }]], (err, id) => err ? reject(err) : resolve(id));
         });
