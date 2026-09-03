@@ -572,73 +572,47 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
     ? conteudo.toString('base64')
     : Buffer.from(conteudo, 'utf-8').toString('base64');
 
-  console.log('[NFSE-EMIT] Criando anexo: ' + nome + ' (' + Math.round(dados.length * 0.75) + ' bytes)...');
+  console.log('[NFSE-EMIT] Anexando: ' + nome + ' (' + Math.round(dados.length * 0.75) + ' bytes) ao chatter...');
 
-  // 1. Cria o attachment com TODOS os campos que Odoo 17+ exige
-  const attachValues = {
+  // Simples e direto: cria ir.attachment vinculado ao registro.
+  // No Odoo 17+, attachments com res_model+res_id+res_field=null aparecem no chatter.
+  const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [{
     name: nome,
     datas: dados,
     res_model: model,
     res_id: resId,
-    res_field: false,        // Odoo 17+: null (false) para attachments de chatter
+    res_field: false,        // CRITICO: null/false = attachment de chatter (nao de campo binario)
     mimetype: mimetype,
     type: 'binary',
-    public: false,            // privado - acessivel via chatter
-    description: nome,
-  };
-  const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
-  console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId);
+    description: msgBody || nome,
+  }]);
+  console.log('[NFSE-EMIT] Anexo criado: id=' + attachmentId + ' (' + nome + ')');
 
-  const body = msgBody || ('Anexo: ' + nome);
-
-  // 2. PRIMEIRA TENTATIVA: account.move.message_post (metodo nativo Odoo)
-  //    Este metodo cria mail.message + vincula attachments + atualiza chatter
-  //    Sintaxe XML-RPC: message_post(ids, body) com kwargs {attachment_ids: [...]}
+  // Cria mensagem no chatter referenciando o anexo (pra ter card visivel)
+  // message_post e o metodo nativo do Odoo - cria mail.message + vincula attachments
   try {
     const msgId = await executeKw(client, db, uid, model, 'message_post', [
       [resId],
-      body,
+      msgBody || ('Anexo: ' + nome),
     ], {
       attachment_ids: [attachmentId],
-      message_type: 'comment',
-      subtype_xmlid: 'mail.mt_comment',
     });
-    console.log('[NFSE-EMIT] message_post OK (msg_id=' + msgId + ') com anexo ' + nome);
-    return attachmentId;
-  } catch (e1) {
-    console.warn('[NFSE-EMIT] message_post falhou: ' + String(e1.message || e1).substring(0, 200));
-  }
-
-  // 3. SEGUNDA TENTATIVA: mail.message.create com attachment_ids=[[6,0,[id]]]
-  try {
-    const msgId = await executeKw(client, db, uid, 'mail.message', 'create', [{
-      model: model,
-      res_id: resId,
-      body: body,
-      message_type: 'comment',
-      subtype_id: false,
-      author_id: false,
-      email_from: false,
-      attachment_ids: [[6, 0, [attachmentId]]],
-    }]);
-    console.log('[NFSE-EMIT] mail.message.create OK (id=' + msgId + ') com anexo ' + nome);
-    return attachmentId;
-  } catch (e2) {
-    console.warn('[NFSE-EMIT] mail.message.create falhou: ' + String(e2.message || e2).substring(0, 200));
-  }
-
-  // 4. TERCEIRA TENTATIVA (fallback): mail.message simples sem attachment_ids
-  //    Anexo ainda fica visivel no chatter via res_model/res_id do ir.attachment
-  try {
-    const msgId = await executeKw(client, db, uid, 'mail.message', 'create', [{
-      model: model,
-      res_id: resId,
-      body: body,
-      message_type: 'comment',
-    }]);
-    console.log('[NFSE-EMIT] mail.message fallback OK (id=' + msgId + ') - anexo visivel via res_model');
-  } catch (e3) {
-    console.warn('[NFSE-EMIT] Todos os metodos falharam. Anexo existe como ir.attachment id=' + attachmentId);
+    console.log('[NFSE-EMIT] Card no chatter criado (msg_id=' + msgId + ') para ' + nome);
+  } catch (e) {
+    // Se message_post falhar (ex: forbidden opcode no SaaS), tenta criar mail.message direto
+    console.warn('[NFSE-EMIT] message_post falhou (' + String(e.message || e).substring(0, 150) + '), tentando mail.message.create...');
+    try {
+      await executeKw(client, db, uid, 'mail.message', 'create', [{
+        model: model,
+        res_id: resId,
+        body: msgBody || ('Anexo: ' + nome),
+        message_type: 'comment',
+        attachment_ids: [[6, 0, [attachmentId]]],
+      }]);
+      console.log('[NFSE-EMIT] mail.message.create OK para ' + nome);
+    } catch (e2) {
+      console.warn('[NFSE-EMIT] mail.message tambem falhou. Anexo existe como ir.attachment id=' + attachmentId + ' (visivel na aba Anexos do Odoo)');
+    }
   }
 
   return attachmentId;
