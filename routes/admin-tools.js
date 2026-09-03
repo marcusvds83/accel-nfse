@@ -795,4 +795,84 @@ router.get('/admin/accel/status', apiKeyAuth, async (req, res) => {
   }
 });
 
+// ==========================================================
+// PREVIEW DO XML DPS - gera o XML sem enviar pra SEFIN
+// ==========================================================
+// POST /api/v1/nfse/admin/xml/preview?move_id=2
+// Retorna o XML DPS que seria enviado pra SEFIN
+// ==========================================================
+router.post('/admin/xml/preview', apiKeyAuth, async (req, res) => {
+  try {
+    if (!config.odoo.enabled) return res.json({ erro: 'Odoo nao configurado' });
+    const client = createClient();
+    const uid = await authenticate(client);
+    const db = config.odoo.db;
+
+    const moveId = parseInt(req.query.move_id || req.body.move_id || '0', 10);
+    if (!moveId) return res.status(400).json({ erro: 'move_id obrigatorio (query ou body)' });
+
+    // Reusa a logica de emissao mas para antes de enviar
+    const { emitirNfseOdoo } = require('../services/nfse-odoo-emit');
+    const { gerarXmlDPS } = require('../services/nfse-xml');
+
+    // Carrega dados da fatura (mesma logica do nfse-odoo-emit)
+    const moveFields = ['name', 'partner_id', 'company_id', 'invoice_date', 'amount_total', 'amount_untaxed', 'state', 'move_type', 'invoice_line_ids'];
+    const moves = await executeKw(client, db, uid, 'account.move', 'read', [[moveId], moveFields]);
+    if (!moves.length) return res.status(404).json({ erro: 'Fatura nao encontrada' });
+    const move = moves[0];
+
+    // Company - le campos disponiveis (fallback se algum nao existir)
+    const companyFields = ['name', 'vat', 'city', 'state_id', 'street', 'street2', 'zip', 'phone', 'email', 'district', 'x_nytro_nfse_dados_prestador_im', 'x_nytro_nfse_numero'];
+    let company = {};
+    try {
+      const companies = await executeKw(client, db, uid, 'res.company', 'read', [[move.company_id[0]], companyFields]);
+      company = companies[0] || {};
+    } catch (e) {
+      // Tenta so com campos basicos
+      const companies = await executeKw(client, db, uid, 'res.company', 'read', [[move.company_id[0]], ['name', 'vat', 'city']]);
+      company = companies[0] || {};
+    }
+
+    // Partner
+    const partnerFields = ['name', 'legal_name', 'vat', 'city', 'state_id', 'street', 'street2', 'zip', 'phone', 'email', 'district', 'country_id'];
+    let partner = {};
+    try {
+      const partners = await executeKw(client, db, uid, 'res.partner', 'read', [[move.partner_id[0]], partnerFields]);
+      partner = partners[0] || {};
+    } catch (e) {
+      const partners = await executeKw(client, db, uid, 'res.partner', 'read', [[move.partner_id[0]], ['name', 'vat']]);
+      partner = partners[0] || {};
+    }
+
+    // Lines
+    const lineFields = ['name', 'quantity', 'price_unit', 'price_subtotal', 'product_id', 'account_id'];
+    const lines = await executeKw(client, db, uid, 'account.move.line', 'read', [move.invoice_line_ids || [], lineFields]);
+
+    // Gera XML
+    const nDPS = (company.x_nytro_nfse_numero || 0) + 1;
+    const { xml, infDpsId } = await gerarXmlDPS({
+      move, company, partner, lines, products: {}, nDPS,
+    });
+
+    // Extrai so o bloco prest pra debug
+    const prestMatch = xml.match(/<prest>[\s\S]*?<\/prest>/);
+    const prestBlock = prestMatch ? prestMatch[0] : '(nao encontrado)';
+
+    res.json({
+      sucesso: true,
+      move_id: moveId,
+      move_name: move.name,
+      nDPS_proximo: nDPS,
+      infDpsId,
+      xml_completo: xml,
+      bloco_prest: prestBlock,
+      company_im: company.x_nytro_nfse_dados_prestador_im,
+      config_nfse_im: config.nfse.inscricao_municipal,
+    });
+  } catch (err) {
+    console.error('[XML-PREVIEW] Erro:', err.message);
+    res.status(500).json({ erro: err.message });
+  }
+});
+
 module.exports = router;
