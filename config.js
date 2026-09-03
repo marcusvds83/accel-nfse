@@ -25,8 +25,16 @@ module.exports = {
     cidade: process.env.NFSE_CIDADE || 'Curitiba',
     codigo_ibge: process.env.NFSE_CODIGO_IBGE || '4106902',
     tp_amb: parseInt(process.env.NFSE_TP_AMB || '2', 10), // 1=producao, 2=homologacao
-    // Serie: emissao propria (own-app) exige 1-49999. Ignora env var se fora da faixa.
-    serie: (() => { const s = process.env.NFSE_SERIE || '1'; const n = parseInt(s, 10); return (n >= 1 && n <= 49999) ? s : '1'; })(),
+    // Serie: NFS-e Nacional - Curitiba usa serie 70000 (emissor proprio nacional)
+    // Descoberto em 03/09/2026 comparando XML de NFS-e real da Accel emitida pela prefeitura
+    // Série 1 gera erro E0116 (SEFIN não reconhece o emitente no CNC)
+    // Faixa 1-49999 = série própria municipal; 50000+ = série nacional
+    serie: (() => {
+      const s = process.env.NFSE_SERIE || '70000';
+      const n = parseInt(s, 10);
+      // Permite qualquer serie positiva (Curitiba usa 70000)
+      return (n > 0) ? s : '70000';
+    })(),
     versao: process.env.NFSE_VERSAO || '1.01',
     ver_aplic: process.env.NFSE_VER_APLIC || 'accel-nfse_1.0.0',
     inscricao_municipal: process.env.NFSE_IM || '170110079908',
