@@ -366,6 +366,7 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     // Compatibilidade: tambem escreve nos campos x_nfse_* (sem _nytro_) que
     // existem na view de fatura do cliente Accel (criados via Studio).
     // Usa try/catch para cada campo - se o campo nao existir no Odoo, ignora.
+    // Nomes dos campos confirmados via GET /admin/accel/status em 03/09/2026.
     const xCompat = {
       x_nfse_numero: String(resultado.nNFSe || proximoNumero),
       x_nfse_codigo_verificacao: resultado.chaveAcesso || resultado.nDFSe || '',
@@ -374,11 +375,12 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
       x_nfse_status_emissao: 'autorizada',
       x_nfse_situacao: '1',  // 1=Normal, 2=Cancelada
       x_nfse_mensagem: false,
-      x_nfse_erro: false,
-      x_nfse_url: resultado.chaveAcesso ? ('https://adn.nfse.gov.br/danfse/' + resultado.chaveAcesso) : '',
+      // x_nfse_erro nao existe no Odoo Accel - removido
+      x_nfse_url_pdf: resultado.chaveAcesso ? ('https://adn.nfse.gov.br/danfse/' + resultado.chaveAcesso) : '',
+      x_nfse_sim_nao: true,  // marcar como "Gerar NFS-e = Sim"
     };
     if (resultado.xmlRetorno && resultado.xmlRetorno.length < 50000) {
-      xCompat.x_nfse_xml = resultado.xmlRetorno;
+      xCompat.x_nfse_xml_retorno = resultado.xmlRetorno;
     }
     Object.assign(updateData, xCompat);
 
@@ -478,10 +480,11 @@ async function safeUpdateError(client, db, uid, moveId, errMsg) {
       x_nytro_nfse_mensagem: errMsg.substring(0, 1000),
     };
     // Compatibilidade: tambem atualiza campos x_nfse_* da view do cliente
+    // Nomes confirmados via GET /admin/accel/status em 03/09/2026
     Object.assign(updateData, {
       x_nfse_status_emissao: 'erro',
-      x_nfse_erro: true,
       x_nfse_mensagem: errMsg.substring(0, 1000),
+      // x_nfse_erro nao existe no Odoo Accel - removido
     });
     await safeWriteMove(client, db, uid, moveId, updateData);
 
@@ -617,10 +620,9 @@ async function processarCancelamentosSolicitados(client, db, uid) {
             x_nytro_nfse_status: 'cancelada',
             x_nytro_nfse_erro: false,
             x_nytro_nfse_mensagem: 'Cancelada: ' + (resultado.xMotivo || ''),
-            // Compatibilidade com x_nfse_*
+            // Compatibilidade com x_nfse_* (nomes confirmados 03/09/2026)
             x_nfse_status_emissao: 'cancelada',
             x_nfse_situacao: '2',
-            x_nfse_erro: false,
             x_nfse_mensagem: 'Cancelada: ' + (resultado.xMotivo || ''),
           });
           await executeKw(client, db, uid, 'mail.message', 'create', [{
@@ -638,9 +640,8 @@ async function processarCancelamentosSolicitados(client, db, uid) {
             x_nytro_nfse_status: 'autorizada',
             x_nytro_nfse_erro: false,
             x_nytro_nfse_mensagem: 'Falha ao cancelar: ' + motivo.substring(0, 500),
-            // Compatibilidade com x_nfse_*
+            // Compatibilidade com x_nfse_* (nomes confirmados 03/09/2026)
             x_nfse_status_emissao: 'autorizada',
-            x_nfse_erro: false,
             x_nfse_mensagem: 'Falha ao cancelar: ' + motivo.substring(0, 500),
           });
           await executeKw(client, db, uid, 'mail.message', 'create', [{
