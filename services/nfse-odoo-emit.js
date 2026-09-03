@@ -540,24 +540,44 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
     datas: dados,
     res_model: model,
     res_id: resId,
+    res_field: false,  // Odoo 17+ requer res_field explicito para attachments de chatter
     mimetype: mimetype,
+    type: 'binary',
   };
   const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
   console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId);
 
   // 2. Cria mail.message vinculando o attachment ao chatter
+  // No Odoo 17+, mail.message precisa de: model, res_id, body, message_type, author_id (false=OdooBot)
+  // e attachment_ids como comando [6, 0, [ids]]
   try {
     const body = msgBody || 'Anexo: ' + nome;
-    await executeKw(client, db, uid, 'mail.message', 'create', [{
+    const msgVals = {
       model: model,
       res_id: resId,
       body: body,
       message_type: 'comment',
+      subtype_id: false,  // comment subtype
+      author_id: false,   // OdooBot
+      email_from: false,
       attachment_ids: [[6, 0, [attachmentId]]],
-    }]);
-    console.log('[NFSE-EMIT] mail.message criada com anexo ' + nome);
+    };
+    const msgId = await executeKw(client, db, uid, 'mail.message', 'create', [msgVals]);
+    console.log('[NFSE-EMIT] mail.message criada (id=' + msgId + ') com anexo ' + nome);
   } catch (msgErr) {
     console.warn('[NFSE-EMIT] mail.message falhou (anexo ainda existe como ir.attachment id=' + attachmentId + '):', msgErr.message);
+    // Fallback: tenta criar mensagem simples sem attachment_ids (anexo fica no chatter via res_model)
+    try {
+      await executeKw(client, db, uid, 'mail.message', 'create', [{
+        model: model,
+        res_id: resId,
+        body: msgBody || ('Anexo: ' + nome),
+        message_type: 'comment',
+      }]);
+      console.log('[NFSE-EMIT] mail.message fallback criada (sem attachment_ids)');
+    } catch (e2) {
+      console.warn('[NFSE-EMIT] mail.message fallback tambem falhou:', e2.message);
+    }
   }
 
   return attachmentId;
