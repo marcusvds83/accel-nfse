@@ -184,6 +184,20 @@ async function enviarDPS(dpsXmlAssinado, cert) {
       console.log('[NFSE-CLIENT]   IdDPS: ' + (respJson.idDps || 'n/a'));
       console.log('[NFSE-CLIENT]   dhProc: ' + (respJson.dataHoraProcessamento || 'n/a'));
       console.log('[NFSE-CLIENT]   verAplic SEFIN: ' + (respJson.versaoAplicativo || 'n/a'));
+
+      // Log de valores para debug - comparar vServ (enviado) vs vLiq (retornado)
+      if (nfseXml) {
+        const vLiqMatch = nfseXml.match(/<vLiq>([^<]+)<\/vLiq>/);
+        const vServMatch = nfseXml.match(/<vServ>([^<]+)<\/vServ>/);
+        const vBCISSQNMatch = nfseXml.match(/<vBCISSQN>([^<]+)<\/vBCISSQN>/);
+        const vISSQNMatch = nfseXml.match(/<vISSQN>([^<]+)<\/vISSQN>/);
+        const tpRetISSQNMatch = nfseXml.match(/<tpRetISSQN>([^<]+)<\/tpRetISSQN>/);
+        console.log('[NFSE-CLIENT]   vServ (DPS): ' + (vServMatch ? vServMatch[1] : 'n/a'));
+        console.log('[NFSE-CLIENT]   vLiq (NFSe retorno): ' + (vLiqMatch ? vLiqMatch[1] : 'n/a'));
+        console.log('[NFSE-CLIENT]   vBCISSQN: ' + (vBCISSQNMatch ? vBCISSQNMatch[1] : 'n/a'));
+        console.log('[NFSE-CLIENT]   vISSQN: ' + (vISSQNMatch ? vISSQNMatch[1] : 'n/a'));
+        console.log('[NFSE-CLIENT]   tpRetISSQN: ' + (tpRetISSQNMatch ? tpRetISSQNMatch[1] : 'n/a') + ' (1=Nao Retido, 2=Retido)');
+      }
       console.log('[NFSE-CLIENT] =============================================');
 
       // Alertas informativos (nao sao erros)

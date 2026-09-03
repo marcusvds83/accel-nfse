@@ -367,6 +367,23 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     // existem na view de fatura do cliente Accel (criados via Studio).
     // Usa try/catch para cada campo - se o campo nao existir no Odoo, ignora.
     // Nomes dos campos confirmados via GET /admin/accel/status em 03/09/2026.
+    //
+    // VALORES DA NFS-e:
+    // - NFS-e NAO soma imposto no total (ISS nao retido = cliente paga so vServ)
+    // - vServ = valor do serviço (amount_untaxed do Odoo, SEM ICMS/ISS)
+    // - vLiq = valor liquido = vServ - deducoes - descontos - retencoes
+    // - Se ISS nao retido: vLiq = vServ (nao soma imposto)
+    const vServOdoo = move.amount_untaxed || move.amount_total || 0;
+    const aliquotaIss = config.nfse.aliquota_iss || 0;
+    const vISS = (vServOdoo * aliquotaIss) / 100;
+
+    // Extrai vLiq da NFS-e retornada pela SEFIN (se disponivel)
+    let vLiqNfse = vServOdoo;  // default = vServ (se ISS nao retido)
+    if (resultado.xmlRetorno) {
+      const vLiqMatch = resultado.xmlRetorno.match(/<vLiq>([^<]+)<\/vLiq>/);
+      if (vLiqMatch) vLiqNfse = parseFloat(vLiqMatch[1]) || vServOdoo;
+    }
+
     const xCompat = {
       x_nfse_numero: String(resultado.nNFSe || proximoNumero),
       x_nfse_codigo_verificacao: resultado.chaveAcesso || resultado.nDFSe || '',
@@ -378,11 +395,34 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
       // x_nfse_erro nao existe no Odoo Accel - removido
       x_nfse_url_pdf: resultado.chaveAcesso ? ('https://adn.nfse.gov.br/danfse/' + resultado.chaveAcesso) : '',
       x_nfse_sim_nao: true,  // marcar como "Gerar NFS-e = Sim"
+      // Campos de VALOR - usar vServ (sem imposto) nao amount_total (com imposto)
+      x_nfse_base_calculo: vServOdoo,         // NFS-e Base Calculo = valor do servico
+      x_nfse_valor_liquido: vLiqNfse,         // NFS-e Valor Liquido = vLiq da SEFIN (ou vServ se nao retido)
+      x_nfse_iss_base: vServOdoo,             // NFS-e Base Calculo ISS
+      x_nfse_iss_aliquota: aliquotaIss,       // NFS-e Aliquota ISS (%)
+      x_nfse_iss_valor: vISS,                 // NFS-e Valor ISS
+      // Impostos federais (zeros - Simples Nacional nao detalha)
+      x_nfse_pis_valor: 0,
+      x_nfse_cofins_valor: 0,
+      x_nfse_inss_valor: 0,
+      x_nfse_ir_valor: 0,
+      x_nfse_csll_valor: 0,
+      x_nfse_outras_retencoes: 0,
+      x_nfse_desconto_incond: 0,
+      x_nfse_desconto_cond: 0,
+      // IBS/CBS (NT 004/2025 - nao enviamos no XML, mas preenche zeros na view)
+      x_nfse_ibs_base: 0,
+      x_nfse_ibs_aliquota: 0,
+      x_nfse_ibs_valor: 0,
+      x_nfse_cbs_base: 0,
+      x_nfse_cbs_aliquota: 0,
+      x_nfse_cbs_valor: 0,
     };
     if (resultado.xmlRetorno && resultado.xmlRetorno.length < 50000) {
       xCompat.x_nfse_xml_retorno = resultado.xmlRetorno;
     }
     Object.assign(updateData, xCompat);
+    console.log('[NFSE-EMIT] Valores Odoo: vServ=' + vServOdoo + ' vLiq=' + vLiqNfse + ' vISS=' + vISS + ' (ISS ' + (config.nfse.aliquota_iss) + '%)');
 
     await safeWriteMove(client, db, uid, moveId, updateData);
 
