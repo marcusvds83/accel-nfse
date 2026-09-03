@@ -175,8 +175,11 @@ async function gerarXmlDPS(dados) {
   // IM (Inscricao Municipal) - OBRIGATORIO se o municipio exigir (Curitiba exige)
   // Fonte: campo x_nytro_nfse_dados_prestador_im no Odoo (setado pelo painel admin aba Impostos)
   // Fallback: config.nfse.inscricao_municipal (env var NFSE_IM no Render)
-  const imPrest = String(company.x_nytro_nfse_dados_prestador_im || c.inscricao_municipal || '').trim();
+  const imFromOdoo = company.x_nytro_nfse_dados_prestador_im || '';
+  const imFromConfig = c.inscricao_municipal || '';
+  const imPrest = String(imFromOdoo || imFromConfig || '').trim();
   const imPrestXml = imPrest ? `\n      <IM>${escXml(imPrest)}</IM>` : '';
+  console.log('[NFSE-XML] IM prestador: odoo="' + imFromOdoo + '" config="' + imFromConfig + '" usado="' + imPrest + '"');
 
   // Nome do prestador (xNome) - usa razao social da empresa
   const nomePrest = company.name || company.legal_name || '';

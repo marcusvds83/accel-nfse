@@ -77,6 +77,39 @@ async function filtrarCamposExistentes(client, db, uid, modelo, camposDesejados)
 }
 
 /**
+ * Faz write em account.move filtrando apenas os campos que existem no modelo.
+ * Isso evita o erro KeyError quando tentamos escrever em campos x_nfse_* que
+ * o cliente nao criou no Studio.
+ *
+ * @param {object} client - XML-RPC client
+ * @param {string} db
+ * @param {number} uid
+ * @param {number} moveId - ID da fatura
+ * @param {object} vals - {campo: valor, ...} - campos podem ser x_nytro_* ou x_nfse_*
+ * @returns {object} { escritos: string[], ignorados: string[] }
+ */
+async function safeWriteMove(client, db, uid, moveId, vals) {
+  const todosCampos = Object.keys(vals);
+  const existentes = await filtrarCamposExistentes(client, db, uid, 'account.move', todosCampos);
+  const valsFiltrado = {};
+  const ignorados = [];
+  for (const campo of todosCampos) {
+    if (existentes.includes(campo)) {
+      valsFiltrado[campo] = vals[campo];
+    } else {
+      ignorados.push(campo);
+    }
+  }
+  if (Object.keys(valsFiltrado).length > 0) {
+    await executeKw(client, db, uid, 'account.move', 'write', [[moveId], valsFiltrado]);
+  }
+  return {
+    escritos: Object.keys(valsFiltrado),
+    ignorados,
+  };
+}
+
+/**
  * Descobre o melhor campo de CNPJ/CPF disponivel no modelo.
  * Prioridade: cnpj_cpf (l10n_br) > x_nytro_cnpj > vat > company_registry
  */
@@ -154,9 +187,9 @@ async function processPendingEmissions() {
 // === Emissao completa ===
 async function emitirNfseOdoo(client, db, uid, moveId) {
   // 1. Marca como processando
-  await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
+  await safeWriteMove(client, db, uid, moveId, {
     x_nytro_nfse_status: 'processando',
-  }]);
+  });
 
   // 2. Carrega certificado A1 do Firebase
   const cert = await carregarCertificado();
@@ -343,7 +376,7 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
     }
     Object.assign(updateData, xCompat);
 
-    await executeKw(client, db, uid, 'account.move', 'write', [[moveId], updateData]);
+    await safeWriteMove(client, db, uid, moveId, updateData);
 
     const msgBody = '<div style="background:#dcfce7;border-left:4px solid #16a34a;padding:12px;margin:8px 0;border-radius:4px">' +
       '<b style="color:#15803d">✓ NFS-e Emitida com Sucesso!</b><br/>' +
@@ -444,7 +477,7 @@ async function safeUpdateError(client, db, uid, moveId, errMsg) {
       x_nfse_erro: true,
       x_nfse_mensagem: errMsg.substring(0, 1000),
     });
-    await executeKw(client, db, uid, 'account.move', 'write', [[moveId], updateData]);
+    await safeWriteMove(client, db, uid, moveId, updateData);
 
     // Extrai codigo do erro se presente (ex: "E0116" -> badge)
     const codigoMatch = errMsg.match(/(?:E\d{4}|cStat=\d+)/);
@@ -574,11 +607,16 @@ async function processarCancelamentosSolicitados(client, db, uid) {
         console.log('[NFSE-CANCEL-POLL] Resultado: sucesso=' + resultado.sucesso + ' | xMotivo=' + (resultado.xMotivo || ''));
 
         if (resultado.sucesso) {
-          await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
+          await safeWriteMove(client, db, uid, moveId, {
             x_nytro_nfse_status: 'cancelada',
             x_nytro_nfse_erro: false,
             x_nytro_nfse_mensagem: 'Cancelada: ' + (resultado.xMotivo || ''),
-          }]);
+            // Compatibilidade com x_nfse_*
+            x_nfse_status_emissao: 'cancelada',
+            x_nfse_situacao: '2',
+            x_nfse_erro: false,
+            x_nfse_mensagem: 'Cancelada: ' + (resultado.xMotivo || ''),
+          });
           await executeKw(client, db, uid, 'mail.message', 'create', [{
             model: 'account.move',
             res_id: moveId,
@@ -590,11 +628,15 @@ async function processarCancelamentosSolicitados(client, db, uid) {
           // Falha no cancelamento: volta o status para 'autorizada' (nao marca como erro)
           const motivo = resultado.xMotivo || 'Erro desconhecido';
           console.log('[NFSE-CANCEL-POLL] FALHA - ' + motivo);
-          await executeKw(client, db, uid, 'account.move', 'write', [[moveId], {
+          await safeWriteMove(client, db, uid, moveId, {
             x_nytro_nfse_status: 'autorizada',
             x_nytro_nfse_erro: false,
             x_nytro_nfse_mensagem: 'Falha ao cancelar: ' + motivo.substring(0, 500),
-          }]);
+            // Compatibilidade com x_nfse_*
+            x_nfse_status_emissao: 'autorizada',
+            x_nfse_erro: false,
+            x_nfse_mensagem: 'Falha ao cancelar: ' + motivo.substring(0, 500),
+          });
           await executeKw(client, db, uid, 'mail.message', 'create', [{
             model: 'account.move',
             res_id: moveId,
