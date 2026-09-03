@@ -172,20 +172,23 @@ async function gerarXmlDPS(dados) {
   const fonePrestXml = fonePrest.length >= 10 ? `\n      <fone>${fonePrest}</fone>` : '';
   const emailPrestXml = emailPrest ? `\n      <email>${escXml(emailPrest)}</email>` : '';
 
-  // IM (Inscricao Municipal) - OPCIONAL via env var NFSE_INCLUIR_IM=1
-  // Descoberto em 03/09/2026: comparando XML da Nytro (funciona) com Accel (E0116):
-  // - Nytro NAO envia <IM> no <prest> e emite normalmente em Curitiba
-  // - Accel enviava <IM>170110079908</IM> e a SEFIN rejeitava com E0116
-  //   porque a IM nao batia com o cadastrado no CNC NFS-e da SEFIN Nacional
-  // Conclusao: quando a empresa e credenciada na SEFIN Nacional por CNPJ,
-  // a SEFIN ja sabe a IM - nao precisa (e nao deve) enviar no XML.
-  // Para incluir IM, setar env var NFSE_INCLUIR_IM=1 no Render.
-  const incluirIm = process.env.NFSE_INCLUIR_IM === '1';
-  const imFromOdoo = company.x_nytro_nfse_dados_prestador_im || '';
-  const imFromConfig = c.inscricao_municipal || '';
-  const imPrest = incluirIm ? String(imFromOdoo || imFromConfig || '').trim() : '';
+  // IM (Inscricao Municipal) - ENVIAR POR PADRAO
+  // Descoberto 03/09/2026 após análise exaustiva do E0116:
+  // - Mensagem E0116 diz: "A IM deve ser informada... conforme CNC NFS-e do municipio emissor"
+  // - Curitiba (cLocEmi=4106902) EXIGE IM no CNC para emissao propria
+  // - Nytro consegue emitir sem IM em PRODUÇÃO (tpAmb=1) - provavelmente credenciada sem exigencia
+  // - Accel precisa enviar IM com valor correto (170110079908)
+  // Para NAO enviar IM, setar NFSE_INCLUIR_IM=0
+  // Prioridade: config (NFSE_IM env var) > Odoo (x_nytro_nfse_dados_prestador_im)
+  // Sempre valida: IM deve ter entre 8 e 15 digitos
+  const naoIncluirIm = process.env.NFSE_INCLUIR_IM === '0';
+  const imFromOdoo = String(company.x_nytro_nfse_dados_prestador_im || '').trim();
+  const imFromConfig = String(c.inscricao_municipal || '').trim();
+  // Valida: IM deve ter 8-15 digitos. Se Odoo tiver formato errado, usa config.
+  const imOdooValida = imFromOdoo && /^\d{8,15}$/.test(imFromOdoo);
+  const imPrest = naoIncluirIm ? '' : (imOdooValida ? imFromOdoo : (imFromConfig && /^\d{8,15}$/.test(imFromConfig) ? imFromConfig : ''));
   const imPrestXml = imPrest ? `\n      <IM>${escXml(imPrest)}</IM>` : '';
-  console.log('[NFSE-XML] IM prestador: incluirIm=' + incluirIm + ' odoo="' + imFromOdoo + '" config="' + imFromConfig + '" usado="' + imPrest + '"');
+  console.log('[NFSE-XML] IM prestador: naoIncluirIm=' + naoIncluirIm + ' odoo="' + imFromOdoo + '" (valida=' + imOdooValida + ') config="' + imFromConfig + '" usado="' + imPrest + '"');
 
   // Nome do prestador (xNome) - OPCIONAL via env var NFSE_INCLUIR_XNOME=1
   // Descoberto em 03/09/2026: XML real da Accel e da Nytro NAO tem <xNome> no <prest>
