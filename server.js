@@ -2,6 +2,7 @@
  * server.js — Servidor Express do middleware NFS-e/NF-e Accel
  * =========================================================
  * Curitiba/PR | SPED NFS-e v1.01 | NF-e SEFAZ | Certificado A1 | Firebase (cofre)
+ * Build re-trigger 03/09/2026 - Render free tier build cache fix
  *
  * Rotas:
  *   GET  /                          — Painel Dashboard (SPA)
