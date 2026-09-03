@@ -218,18 +218,32 @@ function sectionHeader(doc, y, text, totalW, startX) {
 // === Gerador principal ===
 async function gerarPdfDanfse(nfseXml) {
   return new Promise(async (resolve, reject) => {
-    const doc = new PDFDocument({ size: [PW, PH], margin: 0, bufferPages: true });
+    let doc;
+    try {
+      doc = new PDFDocument({ size: [PW, PH], margin: 0, bufferPages: true });
+    } catch (e) {
+      console.error('[NFSE-PDF] Erro ao criar PDFDocument:', e.message);
+      return reject(e);
+    }
     const bufs = [];
     doc.on('data', b => bufs.push(b));
-    doc.on('end', () => resolve(Buffer.concat(bufs)));
-    doc.on('error', reject);
+    doc.on('end', () => {
+      console.log('[NFSE-PDF] PDF gerado com sucesso: ' + bufs.reduce((a, b) => a + b.length, 0) + ' bytes');
+      resolve(Buffer.concat(bufs));
+    });
+    doc.on('error', (e) => {
+      console.error('[NFSE-PDF] Erro no stream do PDF:', e.message);
+      reject(e);
+    });
 
-    const CW = PW - M * 2; // conteudo width
+    try {
+      const CW = PW - M * 2; // conteudo width
 
-    // --- Parseia dados do XML de retorno da SEFIN ---
-    // Extrai DPS primeiro (precisa de nDPS para o cabecalho)
-    const dpsMatch = nfseXml.match(/<DPS[^>]*>[\s\S]*?<\/DPS>/i);
-    const dpsXml = dpsMatch ? dpsMatch[0] : '';
+      // --- Parseia dados do XML de retorno da SEFIN ---
+      // Extrai DPS primeiro (precisa de nDPS para o cabecalho)
+      const dpsMatch = nfseXml.match(/<DPS[^>]*>[\s\S]*?<\/DPS>/i);
+      const dpsXml = dpsMatch ? dpsMatch[0] : '';
+      console.log('[NFSE-PDF] XML recebido: ' + nfseXml.length + ' bytes | DPS extraida: ' + (dpsXml ? 'sim' : 'nao'));
     const nDPS = xmlTag(dpsXml, 'nDPS');
     // Extrai nNFSe do XML de retorno da SEFIN
     const nNFSeMatch = nfseXml.match(/<nNFSe>(\d+)<\/nNFSe>/);
@@ -311,6 +325,7 @@ async function gerarPdfDanfse(nfseXml) {
     const pTotTribSN = xmlTag(dpsXml, 'pTotTribSN') || '0';
 
     // === Borda da pagina ===
+    console.log('[NFSE-PDF] Iniciando cabecalho...');
     doc.rect(M, M, CW, PH - M * 2).lineWidth(1).strokeColor(BLACK).stroke();
 
     // ==============================================
@@ -368,6 +383,7 @@ async function gerarPdfDanfse(nfseXml) {
     // ==============================================
     // QR CODE (canto direito, ao lado da chave de acesso)
     // ==============================================
+    console.log('[NFSE-PDF] Cabecalho OK. Gerando QR Code...');
     const qrX = M + CW - 100;
     const qrY = y + 2;
     try {
@@ -751,6 +767,20 @@ async function gerarPdfDanfse(nfseXml) {
     doc.text('Data de Cientifica\u00e7\u00e3o', M + PAD, y + footH - 10, { width: footW3 - PAD * 2, align: 'center' });
     doc.text('Identifica\u00e7\u00e3o e Assinatura', M + footW3 + PAD, y + footH - 10, { width: footW3 - PAD * 2, align: 'center' });
     doc.text('Identifica\u00e7\u00e3o e Assinatura', M + footW3 * 2 + PAD, y + footH - 10, { width: footW3 - PAD * 2, align: 'center' });
+
+    console.log('[NFSE-PDF] Todas as secoes desenhadas. Finalizando PDF...');
+
+    } catch (e) {
+      // Erro durante geracao do PDF - loga e finaliza doc pra nao ficar vazio
+      console.error('[NFSE-PDF] ERRO durante geracao do PDF:', e.message);
+      console.error(e.stack);
+      // Tenta escrever mensagem de erro no PDF antes de finalizar
+      try {
+        doc.fillColor('red').fontSize(10).text('ERRO AO GERAR DANFSe: ' + e.message, 50, 50);
+      } catch (_) {}
+      // resolve com o que tiver (mesmo que PDF parcial/branco)
+      // Importante: chamar doc.end() pra Promise resolver
+    }
 
     doc.end();
   });
