@@ -723,9 +723,9 @@ router.get('/admin/accel/status', apiKeyAuth, async (req, res) => {
     const uid = await authenticate(client);
     const db = config.odoo.db;
 
-    // 1. Lista campos x_* em account.move e res.company
+    // 1. Lista campos x_* em account.move, res.company e res.partner
     const camposReport = {};
-    for (const modelo of ['account.move', 'res.company']) {
+    for (const modelo of ['account.move', 'res.company', 'res.partner']) {
       const fields = await executeKw(client, db, uid, 'ir.model.fields', 'search_read', [
         [['model', '=', modelo], ['name', 'like', 'x_']],
         ['name', 'field_description', 'ttype'],
@@ -743,26 +743,52 @@ router.get('/admin/accel/status', apiKeyAuth, async (req, res) => {
       'id'
     ]);
 
-    // 3. Lista empresas com valor de x_nytro_nfse_numero
+    // 3. Lista empresas com TODOS os campos x_* (valores reais) - pra debugar IM
     const companyIds = await executeKw(client, db, uid, 'res.company', 'search', [[]]);
+    const camposCompanyParaLer = ['name', 'vat', 'city', ...camposReport['res.company'].map(f => f.name)];
     let companies = [];
     try {
-      companies = await executeKw(client, db, uid, 'res.company', 'read', [companyIds, ['name', 'x_nytro_nfse_numero']]);
+      companies = await executeKw(client, db, uid, 'res.company', 'read', [companyIds, camposCompanyParaLer]);
     } catch (e) {
-      companies = await executeKw(client, db, uid, 'res.company', 'read', [companyIds, ['name']]);
+      // Se falhar (algum campo nao existe), tenta so com campos basicos
+      companies = await executeKw(client, db, uid, 'res.company', 'read', [companyIds, ['name', 'vat', 'city']]);
     }
+
+    // 4. Diagnostico especifico da IM - mostra todos os campos que parecem IM
+    const imDiag = companies.map(c => {
+      const imFields = {};
+      for (const k of Object.keys(c)) {
+        if (/im|insc.*munic|prestador/i.test(k) && c[k]) {
+          imFields[k] = c[k];
+        }
+      }
+      return {
+        id: c.id,
+        name: c.name,
+        vat: c.vat,
+        city: c.city,
+        imFields,
+        // Mostra TODOS os campos x_* com valor != false
+        xFieldsWithValue: Object.keys(c).filter(k => k.startsWith('x_') && c[k] !== false && c[k] !== null && c[k] !== '').reduce((acc, k) => { acc[k] = c[k]; return acc; }, {}),
+      };
+    });
 
     res.json({
       odoo_url: config.odoo.url,
       odoo_db: db,
       total_campos_account_move: camposReport['account.move'].length,
       total_campos_res_company: camposReport['res.company'].length,
+      total_campos_res_partner: camposReport['res.partner'].length,
       tem_x_nytro_nfse_status_em_account_move: camposReport['account.move'].some(f => f.name === 'x_nytro_nfse_status'),
       tem_x_nytro_nfse_numero_em_res_company: camposReport['res.company'].some(f => f.name === 'x_nytro_nfse_numero'),
+      tem_x_nytro_nfse_dados_prestador_im_em_res_company: camposReport['res.company'].some(f => f.name === 'x_nytro_nfse_dados_prestador_im'),
       server_actions: actions,
+      diagnostico_im: imDiag,
+      config_nfse_im: config.nfse.inscricao_municipal,
       empresas: companies.map(c => ({ id: c.id, name: c.name, x_nytro_nfse_numero: c.x_nytro_nfse_numero || 0 })),
       campos_account_move: camposReport['account.move'],
       campos_res_company: camposReport['res.company'],
+      campos_res_partner: camposReport['res.partner'],
     });
   } catch (err) {
     res.status(500).json({ erro: err.message });
