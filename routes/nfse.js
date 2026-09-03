@@ -302,36 +302,18 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       const attachId = await new Promise((resolve, reject) => {
         client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
           name: xmlNome, datas: xmlB64,
-          res_model: 'account.move', res_id: move_id,
-          res_field: false,  // CRITICO: Odoo 17+ exige res_field=false para chatter
-          mimetype: 'application/xml',
-          type: 'binary',
-          description: 'XML NFS-e ' + numNF,
+          res_model: 'account.move', res_id: move_id, mimetype: 'application/xml',
         }]], (err, id) => err ? reject(err) : resolve(id));
       });
-      // Vincula a mensagem no chatter via message_post (metodo nativo Odoo)
-      try {
-        await new Promise((resolve, reject) => {
-          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'account.move', 'message_post', [
-            [move_id],
-            '<b>XML NFS-e ' + numNF + '</b> (re-anexado)',
-          ], {
-            attachment_ids: [attachId],
-          }], (err, id) => err ? reject(err) : resolve(id));
-        });
-        console.log('[NFSE-RE-ATTACH] XML card criado no chatter para ' + xmlNome);
-      } catch (e1) {
-        // Fallback: mail.message.create direto
-        console.warn('[NFSE-RE-ATTACH] message_post falhou, tentando mail.message.create...');
-        await new Promise((resolve, reject) => {
-          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
-            model: 'account.move', res_id: move_id,
-            body: '<b>XML NFS-e ' + numNF + '</b> (re-anexado)',
-            message_type: 'comment',
-            attachment_ids: [[6, 0, [attachId]]],
-          }]], (err, id) => err ? reject(err) : resolve(id));
-        });
-      }
+      // Vincula a mensagem no chatter
+      await new Promise((resolve, reject) => {
+        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+          model: 'account.move', res_id: move_id,
+          body: '<b>XML NFS-e ' + numNF + '</b> (re-anexado)',
+          message_type: 'comment',
+          attachment_ids: [[6, 0, [attachId]]],
+        }]], (err, id) => err ? reject(err) : resolve(id));
+      });
       console.log('[NFSE-RE-ATTACH] XML anexado: ' + xmlNome + ' (attach_id=' + attachId + ')');
     } catch (e) {
       console.error('[NFSE-RE-ATTACH] Falha XML:', e.message);
@@ -356,35 +338,17 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
         const attachId = await new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
             name: pdfNome, datas: pdfB64,
-            res_model: 'account.move', res_id: move_id,
-            res_field: false,  // CRITICO: Odoo 17+ exige res_field=false para chatter
-            mimetype: 'application/pdf',
-            type: 'binary',
-            description: 'DANFSe ' + numNF,
+            res_model: 'account.move', res_id: move_id, mimetype: 'application/pdf',
           }]], (err, id) => err ? reject(err) : resolve(id));
         });
-        // Vincula via message_post (metodo nativo Odoo)
-        try {
-          await new Promise((resolve, reject) => {
-            client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'account.move', 'message_post', [
-              [move_id],
-              '<b>DANFSe ' + numNF + '</b> - re-anexado',
-            ], {
-              attachment_ids: [attachId],
-            }], (err, id) => err ? reject(err) : resolve(id));
-          });
-          console.log('[NFSE-RE-ATTACH] PDF card criado no chatter para ' + pdfNome);
-        } catch (e1) {
-          console.warn('[NFSE-RE-ATTACH] message_post falhou, tentando mail.message.create...');
-          await new Promise((resolve, reject) => {
-            client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
-              model: 'account.move', res_id: move_id,
-              body: '<b>DANFSe ' + numNF + '</b> - re-anexado',
-              message_type: 'comment',
-              attachment_ids: [[6, 0, [attachId]]],
-            }]], (err, id) => err ? reject(err) : resolve(id));
-          });
-        }
+        await new Promise((resolve, reject) => {
+          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+            model: 'account.move', res_id: move_id,
+            body: '<b>DANFSe ' + numNF + '</b> - re-anexado',
+            message_type: 'comment',
+            attachment_ids: [[6, 0, [attachId]]],
+          }]], (err, id) => err ? reject(err) : resolve(id));
+        });
         console.log('[NFSE-RE-ATTACH] PDF anexado: ' + pdfNome + ' (attach_id=' + attachId + ')');
       } else {
         console.error('[NFSE-RE-ATTACH] NENHUM PDF disponivel para anexar.');
