@@ -187,16 +187,24 @@ async function gerarXmlDPS(dados) {
   const imPrestXml = imPrest ? `\n      <IM>${escXml(imPrest)}</IM>` : '';
   console.log('[NFSE-XML] IM prestador: incluirIm=' + incluirIm + ' odoo="' + imFromOdoo + '" config="' + imFromConfig + '" usado="' + imPrest + '"');
 
-  // Nome do prestador (xNome) - usa razao social da empresa
+  // Nome do prestador (xNome) - OPCIONAL via env var NFSE_INCLUIR_XNOME=1
+  // Descoberto em 03/09/2026: XML real da Accel e da Nytro NAO tem <xNome> no <prest>
+  // XSD permite xNome mas a SEFIN aparentemente rejeita quando vem antes de fone/email
+  // Por padrao nao incluir (igual XMLs reais autorizados)
+  const incluirXnome = process.env.NFSE_INCLUIR_XNOME === '1';
   const nomePrest = company.name || company.legal_name || '';
-  const nomePrestXml = nomePrest ? `\n      <xNome>${escXml(nomePrest)}</xNome>` : '';
+  const nomePrestXml = (incluirXnome && nomePrest) ? `\n      <xNome>${escXml(nomePrest)}</xNome>` : '';
 
-  // Endereco do prestador (opcional no XSD)
+  // Endereco do prestador - NAO enviar por padrao
+  // Descoberto 03/09/2026: XMLs reais (Accel e Nytro) NAO tem <end> no <prest>
+  // So a empresa tem endereco no bloco <emit> da NFSe (gerado pela SEFIN)
+  // Por padrao nao enviar - se necessario setar NFSE_INCLUIR_END_PREST=1
+  const incluirEndPrest = process.env.NFSE_INCLUIR_END_PREST === '1';
   const logrPrest = limpaLogradouro(company.street);
   const nroPrest = extraiNumero(company.street, company.street2);
   const bairroPrest = company.district || company.street2 || '';
   const cepPrest = limpaDoc(company.zip || '');
-  const endPrestXml = (logrPrest || nroPrest !== 'S/N') ?
+  const endPrestXml = (incluirEndPrest && (logrPrest || nroPrest !== 'S/N')) ?
     xmlEndereco(ibge, cepPrest, logrPrest, nroPrest, bairroPrest) : '';
 
   // --- Tomador (TCInfoPessoa) ---
