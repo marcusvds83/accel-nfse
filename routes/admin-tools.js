@@ -848,8 +848,10 @@ router.post('/admin/xml/preview', apiKeyAuth, async (req, res) => {
     const lineFields = ['name', 'quantity', 'price_unit', 'price_subtotal', 'product_id', 'account_id'];
     const lines = await executeKw(client, db, uid, 'account.move.line', 'read', [move.invoice_line_ids || [], lineFields]);
 
-    // Gera XML
+    // Gera XML - precisa setar _cnpj em company e partner (igual nfse-odoo-emit faz)
     const nDPS = (company.x_nytro_nfse_numero || 0) + 1;
+    company._cnpj = String(company.vat || '').replace(/[^0-9]/g, '') || '06696225000100';
+    partner._cnpj = String(partner.vat || '').replace(/[^0-9]/g, '');
     const { xml, infDpsId } = await gerarXmlDPS({
       move, company, partner, lines, products: {}, nDPS,
     });

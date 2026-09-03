@@ -222,6 +222,12 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
 
   // Extrai CNPJ da empresa (fallback: CNPJ Nytro da config)
   company._cnpj = extrairCnpj(company, campoCnpjCompany, '06696225000100');
+  // Validacao critica: CNPJ do prestador nao pode ser vazio
+  if (!company._cnpj || company._cnpj.length !== 14) {
+    console.error('[NFSE-EMIT] CNPJ do prestador invalido: "' + company._cnpj + '" (campo=' + campoCnpjCompany + ')');
+    console.error('[NFSE-EMIT] Conteudo do campo: "' + (campoCnpjCompany ? company[campoCnpjCompany] : '(null)') + '"');
+    throw new Error('CNPJ do prestador invalido ou vazio. Campo usado: ' + campoCnpjCompany + '. Verifique o cadastro da empresa no Odoo (Definicoes > Empresas).');
+  }
 
   // Extrai cidade da empresa (city || city_id || config)
   if (company.city_id) {
