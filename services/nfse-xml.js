@@ -265,13 +265,16 @@ async function gerarXmlDPS(dados) {
   const pTotTribSN = fmtValor(c.p_tot_trib_sn);
 
   // --- IBS/CBS (NT 004/2025 v2.0 - XSD v1.01 de 09/02/2026) ---
-  // Estrutura correta conforme tiposComplexos_v1.01.xsd tipo TCRTCInfoIBSCBS:
-  //   IBSCBS > finNFSe, [indFinal], cIndOp, [tpOper], [gRefNFSe], [tpEnteGov], indDest, [dest], [imovel], valores > trib > gIBSCBS > CST, cClassTrib, [cCredPres], [gTribRegular], [gDif]
-  // Os valores de IBS/CBS (vBCIBS, pIBS, vIBS, etc.) NAO sao informados pelo contribuinte na DPS
-  // - sao calculados pela SEFIN na NFS-e autorizada.
+  // DESCOBERTO 03/09/2026: XMLs reais autorizados (Nytro e Accel) NAO tem bloco IBSCBS!
+  // NT 004/2025 v2.0 SUSPENDEU a obrigatoriedade do IBSCBS em 10/12/2025
+  // - Pode omitir o grupo inteiro -> emissao aceita (suspensao ativa)
+  // - Se incluir, XSD valida estritamente e SEFIN pode rejeitar por erros sutis
+  // Conclusao: por padrao NAO incluir IBSCBS (igual XMLs reais autorizados)
+  // Para incluir, setar env var NFSE_INCLUIR_IBSCBS=1 (e ajustar valores no painel admin)
+  const incluirIbsCbs = process.env.NFSE_INCLUIR_IBSCBS === '1';
   const ibsCbs = getIbsCbsConfig();
   let ibsCbsXml = '';
-  if (ibsCbs.habilitado) {
+  if (incluirIbsCbs && ibsCbs.habilitado) {
     // Mapeia valores antigos do painel admin para o novo formato XSD v1.01:
     // - CINOP (1-2 digitos) -> cIndOp (6 digitos, default 110101 = prestacao presencial)
     // - cClassTrib (1-2 digitos) -> cClassTrib (6 digitos, default 000001)
@@ -299,9 +302,9 @@ async function gerarXmlDPS(dados) {
         </trib>
       </valores>
     </IBSCBS>`;
-    console.log('[NFSE-XML] IBS/CBS (XSD v1.01): finNFSe=0 cIndOp=' + cIndOp + ' indDest=0 CST=' + cstIbsCbs + ' cClassTrib=' + cClassTrib);
+    console.log('[NFSE-XML] IBS/CBS INCLUIDO (XSD v1.01): finNFSe=0 cIndOp=' + cIndOp + ' indDest=0 CST=' + cstIbsCbs + ' cClassTrib=' + cClassTrib);
   } else {
-    console.log('[NFSE-XML] IBS/CBS desabilitado via admin');
+    console.log('[NFSE-XML] IBS/CBS NAO incluido (NFSE_INCLUIR_IBSCBS=' + incluirIbsCbs + ', habilitado=' + ibsCbs.habilitado + ') - igual XMLs reais autorizados');
   }
 
   // --- Monta o XML conforme XSD ---
