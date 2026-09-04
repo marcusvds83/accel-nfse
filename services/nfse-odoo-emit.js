@@ -542,7 +542,9 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
 
         // 15b. Anexa o PDF ao chatter
         if (pdfBuf && pdfBuf.length > 0) {
-          console.log('[NFSE-EMIT] 15b. Anexando PDF: ' + pdfNome + ' (' + pdfBuf.length + ' bytes)...');
+          // Log dos primeiros bytes pra confirmar que e PDF valido
+          const header = pdfBuf.slice(0, 8).toString('ascii');
+          console.log('[NFSE-EMIT] 15b. Anexando PDF: ' + pdfNome + ' (' + pdfBuf.length + ' bytes, origem=' + pdfOrigem + ', header="' + header + '")...');
           await uploadAnexo(client, db, uid, 'account.move', moveId,
             pdfNome, pdfBuf, 'application/pdf',
             '<b>DANFSe ' + numNF + '</b>');
@@ -778,4 +780,4 @@ async function processarCancelamentosSolicitados(client, db, uid) {
   }
 }
 
-module.exports = { processPendingEmissions };
+module.exports = { processPendingEmissions, baixarPdfDoPainel };
