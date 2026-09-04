@@ -23,6 +23,67 @@ const { cancelarNfse } = require('./nfse-cancelamento');
 // === XML-RPC Helpers ===
 
 /**
+ * Posta mensagem com anexo no chatter do Odoo 19 (metodo que FUNCIONA).
+ *
+ * message_post e bloqueado no Odoo SaaS (forbidden opcode).
+ * mail.message.create direto NAO mostra preview do PDF no chatter Odoo 19.
+ *
+ * Solucao: mail.message.create com TODOS os campos que Odoo 19 exige
+ * para aparecer no chatter como MENSAGEM com anexo visivel:
+ *   - model, res_id, body, message_type='comment'
+ *   - subtype_id (mt_note = mensagem interna, aparece no chatter)
+ *   - attachment_ids: [[6, 0, [attachmentId]]]
+ *   - record_name, record_name_model, parent_id, author_id, email_from
+ *
+ * @returns {number} ID da mail.message criada
+ */
+async function postarMensagemComAnexo(client, db, uid, model, resId, body, attachmentId, msgType) {
+  // Busca subtype_id mt_note (mensagem interna)
+  let subtypeId = false;
+  try {
+    const subtypes = await executeKw(client, db, uid, 'ir.model.data', 'search_read', [
+      [['name', '=', 'mt_note'], ['module', '=', 'mail']], ['res_id'],
+    ]);
+    if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
+  } catch (e) {
+    console.warn('[NFSE-EMIT] Nao foi possivel buscar mt_note subtype:', e.message);
+  }
+
+  // Busca res_id do registro pra setar record_name (Odoo 19 usa pra mostrar no chatter)
+  let recordName = msgType || 'Anexo';
+  let authorId = false;
+  try {
+    const records = await executeKw(client, db, uid, model, 'read', [[resId], ['name']]);
+    if (records.length > 0 && records[0].name) recordName = records[0].name;
+  } catch (e) { /* ignore */ }
+
+  // Busca partner_id do usuario atual (pra author_id)
+  try {
+    const users = await executeKw(client, db, uid, 'res.users', 'read', [[uid], ['partner_id']]);
+    if (users.length > 0 && users[0].partner_id) authorId = users[0].partner_id[0];
+  } catch (e) { /* ignore */ }
+
+  // Cria mail.message com TODOS os campos Odoo 19
+  const msgVals = {
+    subject: msgType || 'Anexo',
+    model: model,
+    res_id: resId,
+    record_name: recordName,
+    body: body,
+    message_type: 'comment',
+    subtype_id: subtypeId || false,
+    author_id: authorId || false,
+    email_from: false,
+    attachment_ids: [[6, 0, [attachmentId]]],
+    date: new Date().toISOString().replace('T', ' ').substring(0, 19),
+    is_internal: true,
+  };
+
+  const msgId = await executeKw(client, db, uid, 'mail.message', 'create', [msgVals]);
+  return msgId;
+}
+
+/**
  * Baixa o PDF DANFSe do proprio painel admin (nosso endpoint /api/v1/nfse/dashboard/:id/pdf).
  * Esse endpoint ja gera o PDF perfeito (mesmo que aparece no painel admin).
  * Evita duplicar logica de geracao de PDF.
@@ -644,55 +705,14 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
   const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
   console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId);
 
-  // 2. Posta como MENSAGEM INTERNA (nota) no chatter via message_post
-  //    Usa subtype_xmlid='mail.mt_note' (Internal Note / Log)
-  //    message_post e o metodo nativo do Odoo que cria mail.message + vincula attachments
+  // 2. Posta no chatter usando postarMensagemComAnexo (Odoo 19 compativel)
   const body = msgBody || ('Anexo: ' + nome);
   try {
-    const msgId = await executeKw(client, db, uid, model, 'message_post', [
-      [resId],
-      body,
-    ], {
-      attachment_ids: [attachmentId],
-      subtype_xmlid: 'mail.mt_note',
-      message_type: 'notification',
-    });
-    console.log('[NFSE-EMIT] message_post OK (msg_id=' + msgId + ') - nota interna com anexo ' + nome);
-  } catch (e1) {
-    console.warn('[NFSE-EMIT] message_post mt_note falhou: ' + String(e1.message || e1).substring(0, 200));
-    // Fallback: tenta com mt_comment (mensagem para seguidores)
-    try {
-      const msgId = await executeKw(client, db, uid, model, 'message_post', [
-        [resId],
-        body,
-      ], {
-        attachment_ids: [attachmentId],
-        subtype_xmlid: 'mail.mt_comment',
-      });
-      console.log('[NFSE-EMIT] message_post OK (fallback mt_comment, msg_id=' + msgId + ') com anexo ' + nome);
-    } catch (e2) {
-      console.warn('[NFSE-EMIT] message_post mt_comment tambem falhou: ' + String(e2.message || e2).substring(0, 200));
-      // Ultimo fallback: mail.message.create direto
-      try {
-        // Busca subtype_id mt_note
-        let subtypeId = false;
-        const subtypes = await executeKw(client, db, uid, 'ir.model.data', 'search_read', [
-          [['name', '=', 'mt_note'], ['module', '=', 'mail']], ['res_id'],
-        ]);
-        if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
-
-        await executeKw(client, db, uid, 'mail.message', 'create', [{
-          model: model, res_id: resId,
-          body: body,
-          message_type: 'notification',
-          subtype_id: subtypeId || false,
-          attachment_ids: [[6, 0, [attachmentId]]],
-        }]);
-        console.log('[NFSE-EMIT] mail.message.create OK (fallback) com anexo ' + nome);
-      } catch (e3) {
-        console.warn('[NFSE-EMIT] Todos os metodos falharam. Anexo existe como ir.attachment id=' + attachmentId);
-      }
-    }
+    const msgId = await postarMensagemComAnexo(client, db, uid, model, resId, body, attachmentId, nome);
+    console.log('[NFSE-EMIT] mail.message criada (id=' + msgId + ') - mensagem interna com anexo ' + nome);
+  } catch (e) {
+    console.warn('[NFSE-EMIT] postarMensagemComAnexo falhou: ' + String(e.message || e).substring(0, 200));
+    console.warn('[NFSE-EMIT] Anexo existe como ir.attachment id=' + attachmentId + ' (visivel na aba Anexos do Odoo)');
   }
 
   return attachmentId;
@@ -797,4 +817,4 @@ async function processarCancelamentosSolicitados(client, db, uid) {
   }
 }
 
-module.exports = { processPendingEmissions, baixarPdfDoPainel };
+module.exports = { processPendingEmissions, baixarPdfDoPainel, postarMensagemComAnexo };
