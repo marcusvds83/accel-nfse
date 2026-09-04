@@ -295,20 +295,34 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       return res.json({ sucesso: false, erro: 'XML da NFS-e nao disponivel (nem no Odoo, nem na SEFIN)' });
     }
 
-    // 3. Upload XML - usa postarMensagemComAnexo (Odoo 19 compativel)
+    // 3. Upload XML - usa criarAttachmentCompativel (Odoo 19: db_datas em vez de datas)
     try {
       const xmlNome = 'NFS-e-' + String(numNF).padStart(6, '0') + '.xml';
       const xmlB64 = Buffer.from(nfseXml, 'utf-8').toString('base64');
-      const { postarMensagemComAnexo } = require('../services/nfse-odoo-emit');
-      // Helper local que usa o client XML-RPC direto
+      const { criarAttachmentCompativel } = require('../services/nfse-odoo-emit');
       const execKw = (model, method, args, kwargs) => new Promise((resolve, reject) => {
         client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, model, method, args || [], kwargs || {}], (err, r) => err ? reject(err) : resolve(r));
       });
+      // Helper que simula executeKw do nfse-odoo-emit
+      const fakeExecuteKw = (model, method, args, kwargs) => execKw(model, method, args, kwargs);
+      // Descobre campo de conteudo (datas vs db_datas) via fields_get
+      let campoConteudo = 'datas';
+      try {
+        const fieldsInfo = await execKw('ir.attachment', 'fields_get', []);
+        const campos = Object.keys(fieldsInfo);
+        if (!campos.includes('datas')) {
+          if (campos.includes('db_datas')) campoConteudo = 'db_datas';
+          else if (campos.includes('raw')) campoConteudo = 'raw';
+          else campoConteudo = 'db_datas';
+          console.log('[NFSE-RE-ATTACH] Odoo 19: usando campo ' + campoConteudo + ' (datas removido)');
+        }
+      } catch (e) { /* default datas */ }
       const attachId = await execKw('ir.attachment', 'create', [{
-        name: xmlNome, datas: xmlB64,
+        name: xmlNome,
         res_model: 'account.move', res_id: move_id, mimetype: 'application/xml',
+        [campoConteudo]: xmlB64,
       }]);
-      console.log('[NFSE-RE-ATTACH] ir.attachment criado (XML): id=' + attachId);
+      console.log('[NFSE-RE-ATTACH] ir.attachment criado (XML): id=' + attachId + ' (campo=' + campoConteudo + ')');
       const body = '<b>XML NFS-e ' + numNF + '</b> (re-anexado)';
       // Cria mail.message com TODOS os campos Odoo 19
       let subtypeId = false;
@@ -374,34 +388,26 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
         const execKw = (model, method, args, kwargs) => new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, model, method, args || [], kwargs || {}], (err, r) => err ? reject(err) : resolve(r));
         });
+        // Odoo 19: campo 'datas' removido - detecta campo correto via fields_get
+        let campoConteudo = 'datas';
+        try {
+          const fieldsInfo = await execKw('ir.attachment', 'fields_get', []);
+          const campos = Object.keys(fieldsInfo);
+          if (!campos.includes('datas')) {
+            campoConteudo = campos.includes('db_datas') ? 'db_datas' : (campos.includes('raw') ? 'raw' : 'db_datas');
+            console.log('[NFSE-RE-ATTACH] Odoo 19: usando campo ' + campoConteudo + ' para PDF');
+          }
+        } catch (e) {}
         const attachId = await execKw('ir.attachment', 'create', [{
           name: pdfNome,
-          datas: pdfB64,
           res_model: 'account.move',
           res_id: move_id,
           mimetype: 'application/pdf',
+          [campoConteudo]: pdfB64,
         }]);
-        console.log('[NFSE-RE-ATTACH] ir.attachment criado (PDF): id=' + attachId);
+        console.log('[NFSE-RE-ATTACH] ir.attachment criado (PDF): id=' + attachId + ' (campo=' + campoConteudo + ', ' + Math.round(pdfB64.length * 0.75) + ' bytes)');
 
-        // VERIFICACAO CRITICA: le o attachment de volta pra ver se datas foi salvo
-        try {
-          const readBack = await execKw('ir.attachment', 'read', [[attachId], ['name', 'datas', 'mimetype', 'file_size', 'type']]);
-          const rb = readBack[0] || {};
-          const rbDatasLen = rb.datas ? rb.datas.length : 0;
-          const rbFileSize = rb.file_size || 0;
-          console.log('[NFSE-RE-ATTACH] VERIFICACAO: name="' + rb.name + '" datas_len=' + rbDatasLen + ' file_size=' + rbFileSize + ' mimetype=' + rb.mimetype + ' type=' + rb.type);
-          if (rbDatasLen === 0) {
-            console.error('[NFSE-RE-ATTACH] ERRO CRITICO: datas esta VAZIO apos criacao! Tentando write...');
-            // Tenta escrever datas novamente
-            await execKw('ir.attachment', 'write', [[attachId], { datas: pdfB64 }]);
-            const readBack2 = await execKw('ir.attachment', 'read', [[attachId], ['datas', 'file_size']]);
-            console.log('[NFSE-RE-ATTACH] Apos write: datas_len=' + (readBack2[0].datas ? readBack2[0].datas.length : 0) + ' file_size=' + (readBack2[0].file_size || 0));
-          } else {
-            console.log('[NFSE-RE-ATTACH] OK: datas salvo com ' + rbDatasLen + ' chars base64 (' + Math.round(rbDatasLen * 0.75) + ' bytes)');
-          }
-        } catch (e) {
-          console.warn('[NFSE-RE-ATTACH] Nao foi possivel verificar attachment: ' + e.message);
-        }
+
 
         const body = '<b>DANFSe ' + numNF + '</b> - re-anexado';
         // Cria mail.message com TODOS os campos Odoo 19

@@ -23,6 +23,59 @@ const { cancelarNfse } = require('./nfse-cancelamento');
 // === XML-RPC Helpers ===
 
 /**
+ * Cria ir.attachment compativel com Odoo 17/18/19.
+ *
+ * Odoo 19 removeu o campo 'datas' de ir.attachment!
+ * Erro: ValueError: Invalid field 'datas' on 'ir.attachment'
+ *
+ * Esta funcao detecta automaticamente qual campo de conteudo binario existe:
+ * - Odoo 17/18: usa 'datas' (Binary field)
+ * - Odoo 19: usa 'db_datas' (Text field, base64 direto no DB)
+ *
+ * @returns {number} ID do attachment criado
+ */
+async function criarAttachmentCompativel(client, db, uid, nome, dadosBase64, resModel, resId, mimetype) {
+  // 1. Descobre quais campos existem no ir.attachment deste Odoo
+  let campoConteudo = 'datas';  // default (Odoo 17/18)
+  try {
+    const fieldsInfo = await executeKw(client, db, uid, 'ir.attachment', 'fields_get', []);
+    const camposDisponiveis = Object.keys(fieldsInfo);
+    // Odoo 19 nao tem 'datas' - usa 'db_datas'
+    if (!camposDisponiveis.includes('datas')) {
+      if (camposDisponiveis.includes('db_datas')) {
+        campoConteudo = 'db_datas';
+        console.log('[NFSE-EMIT] Odoo 19 detectado: usando campo db_datas (datas removido)');
+      } else if (camposDisponiveis.includes('raw')) {
+        campoConteudo = 'raw';
+        console.log('[NFSE-EMIT] Odoo 19 detectado: usando campo raw');
+      } else {
+        // Loga todos os campos pra debug
+        console.warn('[NFSE-EMIT] Campos ir.attachment: ' + camposDisponiveis.join(', '));
+        // Tenta db_datas mesmo assim
+        campoConteudo = 'db_datas';
+      }
+    } else {
+      console.log('[NFSE-EMIT] Odoo 17/18 detectado: usando campo datas');
+    }
+  } catch (e) {
+    console.warn('[NFSE-EMIT] Nao foi possivel verificar campos ir.attachment: ' + e.message + ' - usando datas (default)');
+  }
+
+  // 2. Cria o attachment com o campo correto
+  const attachValues = {
+    name: nome,
+    res_model: resModel,
+    res_id: resId,
+    mimetype: mimetype,
+  };
+  attachValues[campoConteudo] = dadosBase64;
+
+  const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
+  console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId + ' (campo=' + campoConteudo + ', ' + Math.round(dadosBase64.length * 0.75) + ' bytes)');
+  return attachmentId;
+}
+
+/**
  * Posta mensagem com anexo no chatter do Odoo 19 (metodo que FUNCIONA).
  *
  * message_post e bloqueado no Odoo SaaS (forbidden opcode).
@@ -694,16 +747,8 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
   const header = Buffer.isBuffer(conteudo) ? conteudo.slice(0, 8).toString('ascii') : '';
   console.log('[NFSE-EMIT] Criando anexo: ' + nome + ' (' + Math.round(dados.length * 0.75) + ' bytes, header="' + header + '")...');
 
-  // 1. Cria o attachment
-  const attachValues = {
-    name: nome,
-    datas: dados,
-    res_model: model,
-    res_id: resId,
-    mimetype: mimetype,
-  };
-  const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
-  console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId);
+  // 1. Cria o attachment usando funcao compativel Odoo 17/18/19
+  const attachmentId = await criarAttachmentCompativel(client, db, uid, nome, dados, model, resId, mimetype);
 
   // 2. Posta no chatter usando postarMensagemComAnexo (Odoo 19 compativel)
   const body = msgBody || ('Anexo: ' + nome);
@@ -817,4 +862,4 @@ async function processarCancelamentosSolicitados(client, db, uid) {
   }
 }
 
-module.exports = { processPendingEmissions, baixarPdfDoPainel, postarMensagemComAnexo };
+module.exports = { processPendingEmissions, baixarPdfDoPainel, postarMensagemComAnexo, criarAttachmentCompativel };
