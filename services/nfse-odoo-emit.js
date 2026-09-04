@@ -630,9 +630,10 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
     ? conteudo.toString('base64')
     : Buffer.from(conteudo, 'utf-8').toString('base64');
 
-  console.log('[NFSE-EMIT] Criando anexo: ' + nome + ' (' + Math.round(dados.length * 0.75) + ' bytes)...');
+  const header = Buffer.isBuffer(conteudo) ? conteudo.slice(0, 8).toString('ascii') : '';
+  console.log('[NFSE-EMIT] Criando anexo: ' + nome + ' (' + Math.round(dados.length * 0.75) + ' bytes, header="' + header + '")...');
 
-  // 1. Cria o attachment (igual Nytro - funciona em Odoo 17/18/19)
+  // 1. Cria o attachment
   const attachValues = {
     name: nome,
     datas: dados,
@@ -643,39 +644,55 @@ async function uploadAnexo(client, db, uid, model, resId, nome, conteudo, mimety
   const attachmentId = await executeKw(client, db, uid, 'ir.attachment', 'create', [attachValues]);
   console.log('[NFSE-EMIT] ir.attachment criado: id=' + attachmentId);
 
-  // 2. Busca o subtype_id correto (Odoo 19 EXIGE subtype_id explicito)
-  // mail.mt_comment = notas internas/comentarios (aparece no chatter)
-  // mail.mt_note = log/notes (nao aparece por padrao)
-  let subtypeId = false;
+  // 2. Posta como MENSAGEM INTERNA (nota) no chatter via message_post
+  //    Usa subtype_xmlid='mail.mt_note' (Internal Note / Log)
+  //    message_post e o metodo nativo do Odoo que cria mail.message + vincula attachments
+  const body = msgBody || ('Anexo: ' + nome);
   try {
-    const subtypes = await executeKw(client, db, uid, 'ir.model.data', 'search_read', [
-      [['name', '=', 'mt_comment'], ['module', '=', 'mail']],
-      ['res_id'],
-    ]);
-    if (subtypes.length > 0) {
-      subtypeId = subtypes[0].res_id;
-      console.log('[NFSE-EMIT] subtype_id mt_comment encontrado: ' + subtypeId);
-    }
-  } catch (e) {
-    console.warn('[NFSE-EMIT] Nao foi possivel buscar subtype_id:', e.message);
-  }
+    const msgId = await executeKw(client, db, uid, model, 'message_post', [
+      [resId],
+      body,
+    ], {
+      attachment_ids: [attachmentId],
+      subtype_xmlid: 'mail.mt_note',
+      message_type: 'notification',
+    });
+    console.log('[NFSE-EMIT] message_post OK (msg_id=' + msgId + ') - nota interna com anexo ' + nome);
+  } catch (e1) {
+    console.warn('[NFSE-EMIT] message_post mt_note falhou: ' + String(e1.message || e1).substring(0, 200));
+    // Fallback: tenta com mt_comment (mensagem para seguidores)
+    try {
+      const msgId = await executeKw(client, db, uid, model, 'message_post', [
+        [resId],
+        body,
+      ], {
+        attachment_ids: [attachmentId],
+        subtype_xmlid: 'mail.mt_comment',
+      });
+      console.log('[NFSE-EMIT] message_post OK (fallback mt_comment, msg_id=' + msgId + ') com anexo ' + nome);
+    } catch (e2) {
+      console.warn('[NFSE-EMIT] message_post mt_comment tambem falhou: ' + String(e2.message || e2).substring(0, 200));
+      // Ultimo fallback: mail.message.create direto
+      try {
+        // Busca subtype_id mt_note
+        let subtypeId = false;
+        const subtypes = await executeKw(client, db, uid, 'ir.model.data', 'search_read', [
+          [['name', '=', 'mt_note'], ['module', '=', 'mail']], ['res_id'],
+        ]);
+        if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
 
-  // 3. Cria mail.message com TODOS os campos que Odoo 19 exige
-  try {
-    const body = msgBody || 'Anexo: ' + nome;
-    const msgVals = {
-      model: model,
-      res_id: resId,
-      body: body,
-      message_type: 'comment',
-      subtype_id: subtypeId || false,
-      record_name: nome,  // Odoo 19 usa isso pra mostrar no chatter
-      attachment_ids: [[6, 0, [attachmentId]]],
-    };
-    const msgId = await executeKw(client, db, uid, 'mail.message', 'create', [msgVals]);
-    console.log('[NFSE-EMIT] mail.message criada (id=' + msgId + ') com anexo ' + nome);
-  } catch (msgErr) {
-    console.warn('[NFSE-EMIT] mail.message falhou (anexo ainda existe como ir.attachment id=' + attachmentId + '):', msgErr.message);
+        await executeKw(client, db, uid, 'mail.message', 'create', [{
+          model: model, res_id: resId,
+          body: body,
+          message_type: 'notification',
+          subtype_id: subtypeId || false,
+          attachment_ids: [[6, 0, [attachmentId]]],
+        }]);
+        console.log('[NFSE-EMIT] mail.message.create OK (fallback) com anexo ' + nome);
+      } catch (e3) {
+        console.warn('[NFSE-EMIT] Todos os metodos falharam. Anexo existe como ir.attachment id=' + attachmentId);
+      }
+    }
   }
 
   return attachmentId;

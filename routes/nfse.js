@@ -355,12 +355,21 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       // 4b. Anexa o PDF
       if (pdfBuf && pdfBuf.length > 0) {
         const pdfB64 = pdfBuf.toString('base64');
+        const header = pdfBuf.slice(0, 8).toString('ascii');
+        console.log('[NFSE-RE-ATTACH] 4b. Anexando PDF: ' + pdfNome + ' (' + pdfBuf.length + ' bytes, b64=' + pdfB64.length + ' chars, header="' + header + '")');
         const attachId = await new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
-            name: pdfNome, datas: pdfB64,
-            res_model: 'account.move', res_id: move_id, mimetype: 'application/pdf',
+            name: pdfNome,
+            datas: pdfB64,
+            res_model: 'account.move',
+            res_id: move_id,
+            mimetype: 'application/pdf',
+            type: 'binary',
+            res_field: false,
+            description: 'DANFSe ' + numNF + ' - re-anexado',
           }]], (err, id) => err ? reject(err) : resolve(id));
         });
+        console.log('[NFSE-RE-ATTACH] ir.attachment criado: id=' + attachId);
         // Busca subtype_id mt_comment (Odoo 19 exige explicito)
         let subtypeId = false;
         try {
