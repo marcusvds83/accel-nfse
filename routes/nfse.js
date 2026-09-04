@@ -295,7 +295,7 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       return res.json({ sucesso: false, erro: 'XML da NFS-e nao disponivel (nem no Odoo, nem na SEFIN)' });
     }
 
-    // 3. Upload XML
+    // 3. Upload XML - usa message_post mt_note (mesmo approach do PDF)
     try {
       const xmlNome = 'NFS-e-' + String(numNF).padStart(6, '0') + '.xml';
       const xmlB64 = Buffer.from(nfseXml, 'utf-8').toString('base64');
@@ -305,27 +305,45 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
           res_model: 'account.move', res_id: move_id, mimetype: 'application/xml',
         }]], (err, id) => err ? reject(err) : resolve(id));
       });
-      // Busca subtype_id mt_comment (Odoo 19 exige explicito)
-      let subtypeId = false;
+      console.log('[NFSE-RE-ATTACH] ir.attachment criado (XML): id=' + attachId);
+      // Posta como MENSAGEM INTERNA via message_post
+      const body = '<b>XML NFS-e ' + numNF + '</b> (re-anexado)';
       try {
-        const subtypes = await new Promise((resolve, reject) => {
-          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.model.data', 'search_read', [
-            [['name', '=', 'mt_comment'], ['module', '=', 'mail']], ['res_id'],
-          ]], (err, r) => err ? reject(err) : resolve(r));
+        const msgId = await new Promise((resolve, reject) => {
+          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'account.move', 'message_post', [
+            [move_id], body,
+          ], {
+            attachment_ids: [attachId],
+            subtype_xmlid: 'mail.mt_note',
+            message_type: 'notification',
+          }], (err, id) => err ? reject(err) : resolve(id));
         });
-        if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
-      } catch (e) { /* ignore */ }
-      // Vincula a mensagem no chatter com subtype_id (Odoo 19)
-      await new Promise((resolve, reject) => {
-        client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
-          model: 'account.move', res_id: move_id,
-          body: '<b>XML NFS-e ' + numNF + '</b> (re-anexado)',
-          message_type: 'comment',
-          subtype_id: subtypeId || false,
-          record_name: xmlNome,
-          attachment_ids: [[6, 0, [attachId]]],
-        }]], (err, id) => err ? reject(err) : resolve(id));
-      });
+        console.log('[NFSE-RE-ATTACH] message_post OK (mt_note, msg_id=' + msgId + ') - nota interna com XML');
+      } catch (e1) {
+        console.warn('[NFSE-RE-ATTACH] message_post XML falhou: ' + String(e1.message || e1).substring(0, 200));
+        // Fallback: mail.message.create
+        try {
+          let subtypeId = false;
+          const subtypes = await new Promise((resolve, reject) => {
+            client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.model.data', 'search_read', [
+              [['name', '=', 'mt_note'], ['module', '=', 'mail']], ['res_id'],
+            ]], (err, r) => err ? reject(err) : resolve(r));
+          });
+          if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
+          await new Promise((resolve, reject) => {
+            client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+              model: 'account.move', res_id: move_id,
+              body: body,
+              message_type: 'notification',
+              subtype_id: subtypeId || false,
+              attachment_ids: [[6, 0, [attachId]]],
+            }]], (err, id) => err ? reject(err) : resolve(id));
+          });
+          console.log('[NFSE-RE-ATTACH] mail.message.create OK (fallback) com XML');
+        } catch (e2) {
+          console.warn('[NFSE-RE-ATTACH] Fallback XML tambem falhou');
+        }
+      }
       console.log('[NFSE-RE-ATTACH] XML anexado: ' + xmlNome + ' (attach_id=' + attachId + ')');
     } catch (e) {
       console.error('[NFSE-RE-ATTACH] Falha XML:', e.message);
@@ -352,11 +370,17 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
         }
       }
 
-      // 4b. Anexa o PDF
+      // 4b. Anexa o PDF usando uploadAnexo (mesmo codigo da emissao)
       if (pdfBuf && pdfBuf.length > 0) {
-        const pdfB64 = pdfBuf.toString('base64');
         const header = pdfBuf.slice(0, 8).toString('ascii');
-        console.log('[NFSE-RE-ATTACH] 4b. Anexando PDF: ' + pdfNome + ' (' + pdfBuf.length + ' bytes, b64=' + pdfB64.length + ' chars, header="' + header + '")');
+        console.log('[NFSE-RE-ATTACH] 4b. Anexando PDF: ' + pdfNome + ' (' + pdfBuf.length + ' bytes, header="' + header + '")');
+        // Usa uploadAnexo do nfse-odoo-emit (message_post + mt_note - mensagem interna)
+        const { uploadAnexo } = require('../services/nfse-odoo-emit');
+        // Adaptador: cria um client fake que usa o client XML-RPC existente
+        const fakeClient = client;
+        // Como uploadAnexo usa executeKw helper, precisamos criar adaptador
+        // Melhor: chamar direto as etapas (ir.attachment + message_post)
+        const pdfB64 = pdfBuf.toString('base64');
         const attachId = await new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.attachment', 'create', [{
             name: pdfNome,
@@ -364,32 +388,72 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
             res_model: 'account.move',
             res_id: move_id,
             mimetype: 'application/pdf',
-            type: 'binary',
-            res_field: false,
-            description: 'DANFSe ' + numNF + ' - re-anexado',
           }]], (err, id) => err ? reject(err) : resolve(id));
         });
         console.log('[NFSE-RE-ATTACH] ir.attachment criado: id=' + attachId);
-        // Busca subtype_id mt_comment (Odoo 19 exige explicito)
-        let subtypeId = false;
+
+        // Posta como MENSAGEM INTERNA via message_post (mesmo approach do uploadAnexo)
+        const body = '<b>DANFSe ' + numNF + '</b> - re-anexado';
+        let posted = false;
+        // Tentativa 1: message_post com mt_note (mensagem interna)
         try {
-          const subtypes = await new Promise((resolve, reject) => {
-            client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.model.data', 'search_read', [
-              [['name', '=', 'mt_comment'], ['module', '=', 'mail']], ['res_id'],
-            ]], (err, r) => err ? reject(err) : resolve(r));
+          const msgId = await new Promise((resolve, reject) => {
+            client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'account.move', 'message_post', [
+              [move_id],
+              body,
+            ], {
+              attachment_ids: [attachId],
+              subtype_xmlid: 'mail.mt_note',
+              message_type: 'notification',
+            }], (err, id) => err ? reject(err) : resolve(id));
           });
-          if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
-        } catch (e) { /* ignore */ }
-        await new Promise((resolve, reject) => {
-          client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
-            model: 'account.move', res_id: move_id,
-            body: '<b>DANFSe ' + numNF + '</b> - re-anexado',
-            message_type: 'comment',
-            subtype_id: subtypeId || false,
-            record_name: pdfNome,
-            attachment_ids: [[6, 0, [attachId]]],
-          }]], (err, id) => err ? reject(err) : resolve(id));
-        });
+          console.log('[NFSE-RE-ATTACH] message_post OK (mt_note, msg_id=' + msgId + ') - nota interna com PDF');
+          posted = true;
+        } catch (e1) {
+          console.warn('[NFSE-RE-ATTACH] message_post mt_note falhou: ' + String(e1.message || e1).substring(0, 200));
+        }
+        // Tentativa 2: message_post com mt_comment
+        if (!posted) {
+          try {
+            const msgId = await new Promise((resolve, reject) => {
+              client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'account.move', 'message_post', [
+                [move_id],
+                body,
+              ], {
+                attachment_ids: [attachId],
+                subtype_xmlid: 'mail.mt_comment',
+              }], (err, id) => err ? reject(err) : resolve(id));
+            });
+            console.log('[NFSE-RE-ATTACH] message_post OK (mt_comment, msg_id=' + msgId + ') com PDF');
+            posted = true;
+          } catch (e2) {
+            console.warn('[NFSE-RE-ATTACH] message_post mt_comment falhou: ' + String(e2.message || e2).substring(0, 200));
+          }
+        }
+        // Tentativa 3: mail.message.create direto (fallback)
+        if (!posted) {
+          try {
+            let subtypeId = false;
+            const subtypes = await new Promise((resolve, reject) => {
+              client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'ir.model.data', 'search_read', [
+                [['name', '=', 'mt_note'], ['module', '=', 'mail']], ['res_id'],
+              ]], (err, r) => err ? reject(err) : resolve(r));
+            });
+            if (subtypes.length > 0) subtypeId = subtypes[0].res_id;
+            await new Promise((resolve, reject) => {
+              client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, 'mail.message', 'create', [{
+                model: 'account.move', res_id: move_id,
+                body: body,
+                message_type: 'notification',
+                subtype_id: subtypeId || false,
+                attachment_ids: [[6, 0, [attachId]]],
+              }]], (err, id) => err ? reject(err) : resolve(id));
+            });
+            console.log('[NFSE-RE-ATTACH] mail.message.create OK (fallback) com PDF');
+          } catch (e3) {
+            console.warn('[NFSE-RE-ATTACH] Todos os metodos falharam. PDF existe como ir.attachment id=' + attachId);
+          }
+        }
         console.log('[NFSE-RE-ATTACH] PDF anexado: ' + pdfNome + ' (attach_id=' + attachId + ')');
       } else {
         console.error('[NFSE-RE-ATTACH] NENHUM PDF disponivel para anexar.');
