@@ -544,6 +544,31 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
       if (vLiqMatch) vLiqNfse = parseFloat(vLiqMatch[1]) || vServOdoo;
     }
 
+    // Extrai dados do XML DPS enviado (para preencher campos da view do Odoo)
+    // xDescServ do XML, cTribNac, competencia
+    let xDescServCompleto = 'Servico prestado conforme contrato';
+    let cTribNac = config.nfse.c_trib_nac_padrao || '080201';
+    let competenciaFmt = '';
+    try {
+      if (dpsXml) {
+        const xDescMatch = dpsXml.match(/<xDescServ>([^<]*)<\/xDescServ>/);
+        if (xDescMatch) xDescServCompleto = xDescMatch[1];
+        const cTribMatch = dpsXml.match(/<cTribNac>([^<]*)<\/cTribNac>/);
+        if (cTribMatch) cTribNac = cTribMatch[1];
+        const dCompetMatch = dpsXml.match(/<dCompet>([^<]*)<\/dCompet>/);
+        if (dCompetMatch) {
+          // Converte YYYY-MM-DD para MMAAAA
+          const dt = dCompetMatch[1];
+          if (dt.length >= 7) {
+            competenciaFmt = dt.substring(5, 7) + dt.substring(0, 4);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[NFSE-EMIT] Erro ao extrair dados do DPS pra view: ' + e.message);
+    }
+    console.log('[NFSE-EMIT] Campos view: xDescServ="' + xDescServCompleto.substring(0, 60) + '..." cTribNac=' + cTribNac + ' competencia=' + competenciaFmt);
+
     const xCompat = {
       x_nfse_numero: String(resultado.nNFSe || proximoNumero),
       x_nfse_codigo_verificacao: resultado.chaveAcesso || resultado.nDFSe || '',
@@ -555,6 +580,22 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
       // x_nfse_erro nao existe no Odoo Accel - removido
       x_nfse_url_pdf: resultado.chaveAcesso ? ('https://adn.nfse.gov.br/danfse/' + resultado.chaveAcesso) : '',
       x_nfse_sim_nao: true,  // marcar como "Gerar NFS-e = Sim"
+      // Campos de SERVICO (discriminacao completa com produto + qtd + valor)
+      x_nfse_discriminacao: xDescServCompleto,        // NFS-e Discriminacao
+      x_nfse_codigo_servico: cTribNac,                 // NFS-e Codigo Servico Municipal
+      x_nfse_cnae_codigo: '',                          // NFS-e CNAE (preencher se tiver)
+      x_nfse_item_lista: cTribNac,                     // NFS-e Item Lista Servico
+      x_nfse_municipio_prestacao: '4106902',           // NFS-e Municipio Prestacao (Curitiba)
+      x_nfse_natureza_operacao: '1',                   // NFS-e Natureza Operacao (1=Tributacao no municipio)
+      x_nfse_optante_simples: true,                    // NFS-e Optante Simples Nacional
+      x_nfse_incentivador_cultural: false,             // NFS-e Incentivador Cultural
+      x_nfse_regime_especial: '0',                     // NFS-e Regime Especial Tributacao
+      // RPS (usamos DPS direto, mas preenche campos RPS para compatibilidade)
+      x_nfse_rps_numero: String(proximoNumero),        // NFS-e RPS Numero
+      x_nfse_rps_serie: '1',                           // NFS-e RPS Serie
+      x_nfse_rps_tipo: '1',                            // NFS-e RPS Tipo (1=RPS)
+      // Competencia (MMAAAA da data da fatura)
+      x_nfse_competencia: competenciaFmt,              // NFS-e Competencia
       // Campos de VALOR - usar vServ (sem imposto) nao amount_total (com imposto)
       x_nfse_base_calculo: vServOdoo,         // NFS-e Base Calculo = valor do servico
       x_nfse_valor_liquido: vLiqNfse,         // NFS-e Valor Liquido = vLiq da SEFIN (ou vServ se nao retido)

@@ -242,10 +242,27 @@ async function gerarXmlDPS(dados) {
   const cNBS = firstProduct.x_nytro_c_nbs || c.c_nbs_padrao;
 
   // Descricao do servico (xDescServ) — obrigatória, NAO pode ser vazia
-  // Fallbacks: campo custom NFSe > nome das linhas > nome do produto > narracao > padrao
+  // Deve conter: nome do produto/servico + quantidade + valor unitario
+  // Formato: "GPA - Pessoas PRO (Qtd: 1 x R$ 5000.00 = R$ 5000.00) - Termos e condicoes: ..."
   let xDescServ = firstProduct.x_nytro_descricao_nfse || '';
   if (!xDescServ) {
-    xDescServ = lines.map(l => l.name || '').filter(Boolean).join('; ');
+    // Monta descricao completa a partir das linhas da fatura
+    const partes = lines.map(l => {
+      const nome = l.name || '';
+      const qtd = l.quantity || 0;
+      const valorUnit = l.price_unit || 0;
+      const valorTotal = l.price_subtotal || 0;
+      // Busca nome do produto se tiver product_id
+      const prod = l.product_id && l.product_id[0] ? (products[l.product_id[0]] || {}) : {};
+      const nomeProduto = prod.name || '';
+      // Formato: "Nome do Produto (Qtd: X x R$ Y,YY = R$ Z,ZZ)"
+      const nomeFinal = nomeProduto || nome;
+      if (nomeFinal && qtd && valorUnit) {
+        return nomeFinal + ' (Qtd: ' + qtd + ' x R$ ' + Number(valorUnit).toFixed(2) + ' = R$ ' + Number(valorTotal).toFixed(2) + ')';
+      }
+      return nomeFinal || nome || '';
+    }).filter(Boolean);
+    xDescServ = partes.join(' | ');
   }
   if (!xDescServ && firstProduct.name) {
     xDescServ = String(firstProduct.name);
@@ -256,11 +273,17 @@ async function gerarXmlDPS(dados) {
   if (!xDescServ) {
     xDescServ = 'Servico prestado conforme contrato';
   }
+  // Adiciona "Termos e condicoes" se houver (do campo name da linha)
+  // Mas so se nao for repeticao do que ja tem
+  const termosCondicoes = lines.map(l => l.name || '').filter(n => /termos.*cond/i.test(n)).join(' ');
+  if (termosCondicoes && !xDescServ.toLowerCase().includes('termos')) {
+    xDescServ = xDescServ + ' - ' + termosCondicoes;
+  }
   // Remove tags HTML da descricao (narration do Odoo pode conter HTML)
   xDescServ = xDescServ.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   if (xDescServ.length > 2000) xDescServ = xDescServ.substring(0, 2000);
 
-  console.log('[NFSE-XML] xDescServ=' + xDescServ.substring(0, 80) + (xDescServ.length > 80 ? '...' : ''));
+  console.log('[NFSE-XML] xDescServ=' + xDescServ.substring(0, 100) + (xDescServ.length > 100 ? '...' : ''));
 
   // --- Valores (TCInfoValores) ---
   // Ordem XSD: vServPrest, [vDescCondIncond], [vDedRed], trib
