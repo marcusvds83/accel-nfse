@@ -370,7 +370,7 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       if (pdfBuf && pdfBuf.length > 0) {
         const pdfB64 = pdfBuf.toString('base64');
         const header = pdfBuf.slice(0, 8).toString('ascii');
-        console.log('[NFSE-RE-ATTACH] 4b. Anexando PDF: ' + pdfNome + ' (' + pdfBuf.length + ' bytes, header="' + header + '")');
+        console.log('[NFSE-RE-ATTACH] 4b. Anexando PDF: ' + pdfNome + ' (' + pdfBuf.length + ' bytes, b64=' + pdfB64.length + ' chars, header="' + header + '")');
         const execKw = (model, method, args, kwargs) => new Promise((resolve, reject) => {
           client.methodCall('execute_kw', [config.odoo.db, uid, config.odoo.api_key, model, method, args || [], kwargs || {}], (err, r) => err ? reject(err) : resolve(r));
         });
@@ -382,6 +382,27 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
           mimetype: 'application/pdf',
         }]);
         console.log('[NFSE-RE-ATTACH] ir.attachment criado (PDF): id=' + attachId);
+
+        // VERIFICACAO CRITICA: le o attachment de volta pra ver se datas foi salvo
+        try {
+          const readBack = await execKw('ir.attachment', 'read', [[attachId], ['name', 'datas', 'mimetype', 'file_size', 'type']]);
+          const rb = readBack[0] || {};
+          const rbDatasLen = rb.datas ? rb.datas.length : 0;
+          const rbFileSize = rb.file_size || 0;
+          console.log('[NFSE-RE-ATTACH] VERIFICACAO: name="' + rb.name + '" datas_len=' + rbDatasLen + ' file_size=' + rbFileSize + ' mimetype=' + rb.mimetype + ' type=' + rb.type);
+          if (rbDatasLen === 0) {
+            console.error('[NFSE-RE-ATTACH] ERRO CRITICO: datas esta VAZIO apos criacao! Tentando write...');
+            // Tenta escrever datas novamente
+            await execKw('ir.attachment', 'write', [[attachId], { datas: pdfB64 }]);
+            const readBack2 = await execKw('ir.attachment', 'read', [[attachId], ['datas', 'file_size']]);
+            console.log('[NFSE-RE-ATTACH] Apos write: datas_len=' + (readBack2[0].datas ? readBack2[0].datas.length : 0) + ' file_size=' + (readBack2[0].file_size || 0));
+          } else {
+            console.log('[NFSE-RE-ATTACH] OK: datas salvo com ' + rbDatasLen + ' chars base64 (' + Math.round(rbDatasLen * 0.75) + ' bytes)');
+          }
+        } catch (e) {
+          console.warn('[NFSE-RE-ATTACH] Nao foi possivel verificar attachment: ' + e.message);
+        }
+
         const body = '<b>DANFSe ' + numNF + '</b> - re-anexado';
         // Cria mail.message com TODOS os campos Odoo 19
         let subtypeId = false;
