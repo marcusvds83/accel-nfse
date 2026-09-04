@@ -336,12 +336,20 @@ router.post('/re-attach', apiKeyAuth, async (req, res) => {
       const pdfNome = 'DANFSe-' + String(numNF).padStart(6, '0') + '.pdf';
       let pdfBuf = null;
 
-      // 4a. Gera DANFSe localmente (PDFKit Nytro)
-      console.log('[NFSE-RE-ATTACH] 4a. Gerando DANFSe (PDFKit Nytro com logo)...');
+      // 4a. Baixa DANFSe do painel admin (mesmo PDF que aparece no /painel)
+      console.log('[NFSE-RE-ATTACH] 4a. Baixando DANFSe do painel admin...');
       try {
-        pdfBuf = await gerarPdfDanfse(nfseXml);
+        const { baixarPdfDoPainel } = require('../services/nfse-odoo-emit');
+        pdfBuf = await baixarPdfDoPainel(move_id);
       } catch (eLocal) {
-        console.error('[NFSE-RE-ATTACH] FALHA ao gerar DANFSe: ' + eLocal.message);
+        console.error('[NFSE-RE-ATTACH] FALHA ao baixar DANFSe do painel: ' + eLocal.message);
+        // Fallback: gera localmente
+        console.log('[NFSE-RE-ATTACH] Tentando gerar PDF localmente como fallback...');
+        try {
+          pdfBuf = await gerarPdfDanfse(nfseXml);
+        } catch (e2) {
+          console.error('[NFSE-RE-ATTACH] Fallback tambem falhou: ' + e2.message);
+        }
       }
 
       // 4b. Anexa o PDF

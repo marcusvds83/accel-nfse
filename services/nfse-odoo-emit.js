@@ -10,6 +10,8 @@
  */
 
 const xmlrpc = require('xmlrpc');
+const https = require('https');
+const http = require('http');
 const config = require('../config');
 const { gerarXmlDPS } = require('./nfse-xml');
 const { assinarXml } = require('./nfse-signer');
@@ -19,6 +21,50 @@ const { gerarPdfDanfse } = require('./nfse-pdf');
 const { cancelarNfse } = require('./nfse-cancelamento');
 
 // === XML-RPC Helpers ===
+
+/**
+ * Baixa o PDF DANFSe do proprio painel admin (nosso endpoint /api/v1/nfse/dashboard/:id/pdf).
+ * Esse endpoint ja gera o PDF perfeito (mesmo que aparece no painel admin).
+ * Evita duplicar logica de geracao de PDF.
+ *
+ * @param {number} moveId - ID da fatura no Odoo
+ * @returns {Promise<Buffer>} Buffer do PDF
+ */
+async function baixarPdfDoPainel(moveId) {
+  // Descobre a URL do proprio middleware (Render ou localhost)
+  const port = config.port || process.env.PORT || 10000;
+  const isRender = !!process.env.RENDER || !!process.env.RENDER_EXTERNAL_URL;
+  const baseUrl = isRender
+    ? (process.env.RENDER_EXTERNAL_URL || 'https://accel-nfse.onrender.com').replace(/\/+$/, '')
+    : 'http://localhost:' + port;
+  const url = baseUrl + '/api/v1/nfse/dashboard/' + moveId + '/pdf';
+
+  console.log('[NFSE-PDF] Baixando PDF do painel: ' + url);
+
+  return new Promise((resolve, reject) => {
+    const lib = url.startsWith('https') ? https : http;
+    const req = lib.get(url, {
+      headers: { 'X-Api-Key': process.env.API_KEY || config.apiKey },
+      timeout: 30000,
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => reject(new Error('HTTP ' + res.statusCode + ': ' + body.substring(0, 200))));
+        return;
+      }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        console.log('[NFSE-PDF] PDF baixado do painel: ' + buf.length + ' bytes');
+        resolve(buf);
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout ao baixar PDF do painel')); });
+  });
+}
 
 function createClient(url) {
   const base = url.replace(/\/+$/, '');
@@ -470,17 +516,27 @@ async function emitirNfseOdoo(client, db, uid, moveId) {
         let pdfBuf = null;
         let pdfOrigem = '';
 
-        // 15a. Gera PDF DANFSe localmente (PDFKit Nytro — ESTRATEGIA PRINCIPAL)
-        if (resultado.xmlRetorno) {
-          console.log('[NFSE-EMIT] 15a. Gerando DANFSe localmente (PDFKit Nytro com logo)...');
-          try {
-            pdfBuf = await gerarPdfDanfse(resultado.xmlRetorno);
-            if (pdfBuf) {
-              pdfOrigem = 'danfse_nytro';
-              console.log('[NFSE-EMIT] DANFSe Nytro gerado: ' + pdfBuf.length + ' bytes');
+        // 15a. Baixa PDF DANFSe do painel admin (mesmo PDF que aparece no /painel)
+        // O endpoint /api/v1/nfse/dashboard/:id/pdf ja gera o PDF perfeito.
+        console.log('[NFSE-EMIT] 15a. Baixando DANFSe do painel admin...');
+        try {
+          pdfBuf = await baixarPdfDoPainel(moveId);
+          if (pdfBuf) {
+            pdfOrigem = 'painel_admin';
+            console.log('[NFSE-EMIT] DANFSe baixado do painel: ' + pdfBuf.length + ' bytes');
+          }
+        } catch (eLocal) {
+          console.error('[NFSE-EMIT] FALHA ao baixar DANFSe do painel: ' + eLocal.message);
+          // Fallback: tenta gerar localmente
+          if (resultado.xmlRetorno) {
+            console.log('[NFSE-EMIT] Tentando gerar PDF localmente como fallback...');
+            try {
+              pdfBuf = await gerarPdfDanfse(resultado.xmlRetorno);
+              pdfOrigem = 'danfse_local_fallback';
+              console.log('[NFSE-EMIT] DANFSe gerado localmente (fallback): ' + pdfBuf.length + ' bytes');
+            } catch (e2) {
+              console.error('[NFSE-EMIT] Fallback tambem falhou: ' + e2.message);
             }
-          } catch (eLocal) {
-            console.error('[NFSE-EMIT] FALHA ao gerar DANFSe: ' + eLocal.message);
           }
         }
 
